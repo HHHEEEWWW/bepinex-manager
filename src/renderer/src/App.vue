@@ -10,7 +10,9 @@ import type {
   BepInExRelease,
   LogReadResult,
   IsolatedProfileInfo,
-  ModInstallResult
+  LibraryAddResult,
+  LibraryScanResult,
+  ModInstallItem
 } from '@shared/types'
 
 const { message } = createDiscreteApi(['message'], {
@@ -58,13 +60,19 @@ const isolateModal = ref<{
 } | null>(null)
 
 // ---- MOD 拖拽安装 ----
-const dragOver = ref(false)
-const modBusy = ref(false)
-const modResult = ref<ModInstallResult | null>(null)
+const libBusy = ref(false)
+/** 插件库扫描结果 */
+const library = ref<LibraryScanResult | null>(null)
+/** 拖拽高亮状态 */
+const libDragOver = ref(false)
+const profileDragOver = ref(false)
+const trashOver = ref(false)
+/** 入库/装入结果反馈（弹窗） */
+const libFeedback = ref<{ ok: ModInstallItem[]; warn: ModInstallItem[]; bad: ModInstallItem[] } | null>(null)
 
-/** 拖拽安装 MOD：.dll 直接装入，.zip 自动解压提取插件（装到当前档案） */
-async function onDropMods(e: DragEvent): Promise<void> {
-  dragOver.value = false
+/** 外部文件拖到插件库：dll 直接入库，zip 自动解压条目化 */
+async function onDropToLibrary(e: DragEvent): Promise<void> {
+  libDragOver.value = false
   if (!selectedGame.value) return
   const files = Array.from(e.dataTransfer?.files ?? [])
   if (!files.length) return
@@ -81,23 +89,120 @@ async function onDropMods(e: DragEvent): Promise<void> {
     message.warning('无法读取拖入文件的路径')
     return
   }
-  modBusy.value = true
+  libBusy.value = true
   try {
-    const res = await window.api.installMods(selectedGame.value.gameDir, paths)
-    modResult.value = res
-    const ok = res.installed.length
-    const bad = res.failed.length
-    if (ok && !bad) message.success(`已安装 ${ok} 个插件${res.ignored.length ? `，忽略 ${res.ignored.length} 个非插件文件` : ''}`)
-    else if (ok && bad) message.warning(`已安装 ${ok} 个，失败 ${bad} 个（点击结果查看详情）`)
-    else if (bad) message.error(`安装失败 ${bad} 个（点击结果查看详情）`)
-    else message.info('没有可安装的插件（点击结果查看详情）')
-    if (ok) {
-      scan.value = await window.api.scanGame(selectedGame.value.gameDir)
-    }
+    const res = await window.api.libraryAdd(selectedGame.value.gameDir, paths)
+    showLibFeedback(res)
+    await refreshLibrary()
   } catch (err) {
-    message.error(`安装失败：${(err as Error).message}`)
+    message.error(`入库失败：${(err as Error).message}`)
   } finally {
-    modBusy.value = false
+    libBusy.value = false
+  }
+}
+
+/** 库条目拖进档案插件区：复制到当前档案 plugins */
+async function onDropToProfile(e: DragEvent): Promise<void> {
+  profileDragOver.value = false
+  if (!selectedGame.value) return
+  // 外部文件拖错位置 → 引导去左侧
+  if (e.dataTransfer?.files?.length) {
+    message.info('外部文件请拖到左侧「插件库」区域入库')
+    return
+  }
+  const relPath = e.dataTransfer?.getData('application/x-bm-lib')
+  if (!relPath) return
+  await installEntryToProfile(relPath)
+}
+
+/** 档案插件拖到删除区：从当前档案移除（插件库保留） */
+async function onDropTrash(e: DragEvent): Promise<void> {
+  trashOver.value = false
+  if (!selectedGame.value) return
+  const relPath = e.dataTransfer?.getData('application/x-bm-profile')
+  if (!relPath) return
+  try {
+    await window.api.profileRemoveEntry(selectedGame.value.gameDir, selectedGame.value.name, relPath)
+    message.success(`已从档案移除「${relPath}」（插件库保留）`)
+    await refreshAll()
+  } catch (err) {
+    message.error(String(err))
+  }
+}
+
+/** 拖拽起点：库条目 */
+function onDragLibEntry(e: DragEvent, relPath: string): void {
+  if (!e.dataTransfer) return
+  e.dataTransfer.setData('application/x-bm-lib', relPath)
+  e.dataTransfer.effectAllowed = 'copy'
+}
+
+/** 拖拽起点：档案条目 */
+function onDragProfileEntry(e: DragEvent, relPath: string): void {
+  if (!e.dataTransfer) return
+  e.dataTransfer.setData('application/x-bm-profile', relPath)
+  e.dataTransfer.effectAllowed = 'move'
+}
+
+/** 复制库条目到当前档案（拖拽 + 按钮共用） */
+async function installEntryToProfile(relPath: string): Promise<void> {
+  if (!selectedGame.value) return
+  try {
+    await window.api.libraryToProfile(selectedGame.value.gameDir, selectedGame.value.name, relPath)
+    message.success(`已装入当前档案：${relPath}`)
+    await refreshAll()
+  } catch (err) {
+    message.error(String(err))
+  }
+}
+
+/** 入库结果提示（弹窗 + 摘要） */
+function showLibFeedback(res: LibraryAddResult): void {
+  libFeedback.value = {
+    ok: [...res.added, ...res.updated],
+    warn: res.ignored,
+    bad: res.failed
+  }
+  const ok = res.added.length + res.updated.length
+  const bad = res.failed.length
+  if (ok && !bad) message.success(`已入库 ${ok} 个插件`)
+  else if (ok && bad) message.warning(`已入库 ${ok} 个，失败 ${bad} 个`)
+  else if (bad) message.error(`入库失败 ${bad} 个`)
+  else message.info('没有可入库的插件')
+}
+
+/** 刷新档案插件 + 插件库 */
+async function refreshAll(): Promise<void> {
+  if (!selectedGame.value || !selectedGame.value.bepinex?.isIsolated) return
+  try {
+    scan.value = await window.api.scanGame(selectedGame.value.gameDir)
+    await refreshLibrary()
+  } catch (e) {
+    message.error(String(e))
+  }
+}
+
+/** 刷新插件库（含 installed 标记） */
+async function refreshLibrary(): Promise<void> {
+  if (!selectedGame.value || !selectedGame.value.bepinex?.isIsolated) return
+  try {
+    const res = await window.api.libraryScan(selectedGame.value.gameDir, selectedGame.value.name)
+    if (res.collected > 0) {
+      message.info(`已自动收集 ${res.collected} 个现有插件到插件库`)
+    }
+    library.value = res
+  } catch (e) {
+    message.error(String(e))
+  }
+}
+
+/** 在文件管理器中打开插件库目录 */
+async function openLibraryDir(): Promise<void> {
+  if (!library.value) return
+  try {
+    await window.api.openPath(library.value.libraryDir)
+  } catch (e) {
+    message.error(String(e))
   }
 }
 
@@ -171,6 +276,7 @@ async function selectGame(g: GameEntry): Promise<void> {
     scan.value = await window.api.scanGame(g.gameDir)
     isolatedList.value = await window.api.isolationList(g.gameDir, g.name)
     isolatedCurrent.value = await window.api.isolationCurrent(g.gameDir, g.name)
+    await refreshLibrary()
   } catch (e) {
     message.error(String(e))
   } finally {
@@ -207,7 +313,7 @@ async function doSwitchIsolated(p: IsolatedProfileInfo): Promise<void> {
     await window.api.isolationSwitch(selectedGame.value.gameDir, selectedGame.value.name, p.id)
     message.success(`已切换到档案「${p.name}」，下次启动游戏生效`)
     isolatedCurrent.value = p
-    scan.value = await window.api.scanGame(selectedGame.value.gameDir)
+    await refreshAll()
   } catch (e) {
     message.error(String(e))
   }
@@ -592,96 +698,165 @@ function displayName(p: PluginInfo): string {
             <span class="dim iso-tip">隔离模式下每个档案拥有独立的插件与配置</span>
           </div>
 
-          <!-- 插件统计 -->
-          <div class="stat-line">
-            共 <b>{{ scan.plugins.length }}</b> 个插件
-            <span class="stat-dot ok"></span>启用 {{ enabledCount }}
-            <span class="stat-dot off"></span>禁用 {{ scan.plugins.length - enabledCount }}
-          </div>
-
-          <!-- MOD 拖拽安装 -->
-          <div
-            class="drop-zone"
-            :class="{ over: dragOver, busy: modBusy }"
-            @dragover.prevent="dragOver = true"
-            @dragleave.prevent="dragOver = false"
-            @drop.prevent="onDropMods"
-          >
-            <div class="drop-icon">{{ modBusy ? '⏳' : '📥' }}</div>
-            <div class="drop-text">
-              <b>{{ modBusy ? '正在安装…' : '拖拽 MOD 到这里安装' }}</b>
-              <span class="dim">支持 .dll 文件或 .zip 压缩包（自动解压提取插件），安装到当前档案，重名自动覆盖更新</span>
-            </div>
-            <button class="btn-plain drop-help" @click="openPluginsRoot">或打开插件目录手动放置</button>
-          </div>
-
-          <!-- 插件列表 -->
-          <div class="plugin-list">
-            <div
-              v-for="p in scan.plugins"
-              :key="p.id"
-              class="plugin-card"
-              :class="{ off: !p.enabled }"
+          <!-- 插件库 + 当前档案：左右分栏 -->
+          <div class="split-main">
+            <!-- 左栏：插件库（该游戏全部插件，可拖拽） -->
+            <section
+              class="lib-pane"
+              @dragover.prevent="libDragOver = true"
+              @dragleave.prevent="libDragOver = false"
+              @drop.prevent="onDropToLibrary"
             >
-              <div class="plugin-left">
-                <div class="plugin-name-row">
-                  <span class="plugin-name">{{ displayName(p) }}</span>
-                  <span v-if="p.meta" class="ver-tag">{{ p.meta.version }}</span>
-                  <span v-if="!p.enabled" class="pill pill-off">已禁用</span>
-                  <span v-if="p.metaError" class="pill pill-warn" :title="p.metaError">元数据读取失败</span>
-                  <span
-                    v-for="c in conflictsFor(p)"
-                    :key="c.kind + c.pluginIds.join()"
-                    class="pill pill-conflict"
-                    :title="c.message"
-                  >
-                    {{ c.kind === 'duplicate-guid' ? 'GUID 冲突' : '文件冲突' }}
-                  </span>
-                </div>
-                <div class="plugin-guid mono dim">
-                  {{ p.meta ? p.meta.guid : p.fileName }}
-                  <span class="sep">·</span> {{ fmtSize(p.sizeBytes) }}
-                </div>
-                <div v-if="p.note" class="plugin-note" :title="p.note">
-                  {{ p.note.split('\n')[0] }}
-                </div>
-                <div v-if="missingDeps(p).length" class="dep-warn">
-                  ⚠ 缺少依赖：{{ missingDeps(p).join(', ') }}
-                </div>
-                <div v-else-if="p.meta && p.meta.dependencies.length" class="dep-ok dim">
-                  依赖：{{ p.meta.dependencies.join(', ') }}
+              <div class="pane-head">
+                <span class="pane-title">📚 插件库 <b>{{ library?.entries.length ?? 0 }}</b></span>
+                <div class="pane-head-right">
+                  <button class="btn-plain mini" title="在文件管理器中打开插件库目录" @click="openLibraryDir">
+                    📂 打开目录
+                  </button>
                 </div>
               </div>
-              <div class="plugin-right">
-                <button
-                  v-if="p.configFile"
-                  class="btn-plain"
-                  title="编辑配置文件"
-                  @click="openConfig(p)"
-                >
-                  ⚙ 配置
-                </button>
-                <span
-                  v-else-if="p.meta"
-                  class="cfg-pending dim"
-                  title="配置文件由插件在游戏首次运行时自动生成，运行一次游戏后即可编辑"
-                >
-                  配置未生成（运行游戏后出现）
-                </span>
-                <button
-                  class="switch-btn"
-                  :class="p.enabled ? 'on' : 'off'"
-                  @click="togglePlugin(p)"
-                >
-                  {{ p.enabled ? '启用中' : '已禁用' }}
-                </button>
+              <div class="lib-drop-tip" :class="{ over: libDragOver, busy: libBusy }">
+                {{ libBusy ? '⏳ 正在入库…' : '⬇ 拖 .dll / .zip 文件到这里入库（zip 自动解压）' }}
               </div>
-            </div>
+              <div v-if="library && library.entries.length" class="lib-grid">
+                <div
+                  v-for="e in library.entries"
+                  :key="e.relPath"
+                  class="lib-card"
+                  :class="{ installed: e.installed }"
+                  draggable="true"
+                  :title="`「${e.name}」\n拖到右侧档案插件区 = 装入当前档案\n双击也可装入`"
+                  @dragstart="onDragLibEntry($event, e.relPath)"
+                  @dblclick="installEntryToProfile(e.relPath)"
+                >
+                  <div class="lib-card-top">
+                    <span class="lib-icon">{{ e.isDir ? '📦' : '🧩' }}</span>
+                    <span class="lib-name">{{ e.name }}</span>
+                    <span v-if="e.installed" class="pill pill-ok">✓ 已装</span>
+                  </div>
+                  <div class="lib-card-meta mono dim">
+                    {{ e.meta ? e.meta.guid : e.relPath }}
+                    <span class="sep">·</span> {{ fmtSize(e.sizeBytes) }}
+                  </div>
+                  <div class="lib-card-actions">
+                    <button
+                      v-if="!e.installed"
+                      class="btn-plain mini"
+                      @click.stop="installEntryToProfile(e.relPath)"
+                    >
+                      ＋ 装入档案
+                    </button>
+                    <span v-else class="dim mini">拖到档案区可更新</span>
+                  </div>
+                </div>
+              </div>
+              <div v-else class="lib-empty">
+                <div class="center-icon">📭</div>
+                <div class="center-text dim">插件库为空：拖入 .dll / .zip 入库，再拖进右侧档案</div>
+              </div>
+            </section>
 
-            <div v-if="scan.plugins.length === 0" class="center-box">
-              <div class="center-icon">📭</div>
-              <div class="center-text dim">plugins 目录下还没有插件</div>
-            </div>
+            <!-- 右栏：当前档案插件区（接收库条目拖入） -->
+            <section
+              class="profile-pane"
+              @dragover.prevent="profileDragOver = true"
+              @dragleave.prevent="profileDragOver = false"
+              @drop.prevent="onDropToProfile"
+            >
+              <div class="pane-head">
+                <span class="pane-title">📁 当前档案「{{ isolatedCurrent?.name }}」插件 <b>{{ scan.plugins.length }}</b></span>
+                <div class="pane-head-right">
+                  <span class="stat-dot ok"></span>{{ enabledCount }} 启用
+                  <span class="stat-dot off"></span>{{ scan.plugins.length - enabledCount }} 禁用
+                </div>
+              </div>
+              <div class="profile-drop-tip" :class="{ over: profileDragOver }">
+                {{ profileDragOver ? '松手装入当前档案' : '⬇ 拖插件库条目到这里 = 装入当前档案' }}
+              </div>
+
+              <div class="plugin-list">
+                <div
+                  v-for="p in scan.plugins"
+                  :key="p.id"
+                  class="plugin-card"
+                  :class="{ off: !p.enabled }"
+                  draggable="true"
+                  :title="'拖到下方删除区 = 从当前档案移除（插件库保留）'"
+                  @dragstart="onDragProfileEntry($event, p.relPath)"
+                >
+                  <div class="plugin-left">
+                    <div class="plugin-name-row">
+                      <span class="plugin-name">{{ displayName(p) }}</span>
+                      <span v-if="p.meta" class="ver-tag">{{ p.meta.version }}</span>
+                      <span v-if="!p.enabled" class="pill pill-off">已禁用</span>
+                      <span v-if="p.metaError" class="pill pill-warn" :title="p.metaError">元数据读取失败</span>
+                      <span
+                        v-for="c in conflictsFor(p)"
+                        :key="c.kind + c.pluginIds.join()"
+                        class="pill pill-conflict"
+                        :title="c.message"
+                      >
+                        {{ c.kind === 'duplicate-guid' ? 'GUID 冲突' : '文件冲突' }}
+                      </span>
+                    </div>
+                    <div class="plugin-guid mono dim">
+                      {{ p.meta ? p.meta.guid : p.fileName }}
+                      <span class="sep">·</span> {{ fmtSize(p.sizeBytes) }}
+                    </div>
+                    <div v-if="p.note" class="plugin-note" :title="p.note">
+                      {{ p.note.split('\n')[0] }}
+                    </div>
+                    <div v-if="missingDeps(p).length" class="dep-warn">
+                      ⚠ 缺少依赖：{{ missingDeps(p).join(', ') }}
+                    </div>
+                    <div v-else-if="p.meta && p.meta.dependencies.length" class="dep-ok dim">
+                      依赖：{{ p.meta.dependencies.join(', ') }}
+                    </div>
+                  </div>
+                  <div class="plugin-right">
+                    <button
+                      v-if="p.configFile"
+                      class="btn-plain"
+                      title="编辑配置文件"
+                      @click="openConfig(p)"
+                    >
+                      ⚙ 配置
+                    </button>
+                    <span
+                      v-else-if="p.meta"
+                      class="cfg-pending dim"
+                      title="配置文件由插件在游戏首次运行时自动生成，运行一次游戏后即可编辑"
+                    >
+                      配置未生成（运行游戏后出现）
+                    </span>
+                    <button
+                      class="switch-btn"
+                      :class="p.enabled ? 'on' : 'off'"
+                      @click="togglePlugin(p)"
+                    >
+                      {{ p.enabled ? '启用中' : '已禁用' }}
+                    </button>
+                  </div>
+                </div>
+
+                <div v-if="scan.plugins.length === 0" class="center-box">
+                  <div class="center-icon">📭</div>
+                  <div class="center-text dim">当前档案还没有插件：从左侧插件库拖入即可</div>
+                </div>
+              </div>
+
+              <!-- 删除区 -->
+              <div
+                class="trash-zone"
+                :class="{ over: trashOver }"
+                @dragover.prevent="trashOver = true"
+                @dragleave.prevent="trashOver = false"
+                @drop.prevent="onDropTrash"
+              >
+                <span class="trash-icon">🗑</span>
+                <span>{{ trashOver ? '松手 = 从当前档案移除（插件库保留）' : '拖档案插件到这里 = 从档案移除（插件库保留）' }}</span>
+              </div>
+            </section>
           </div>
         </template>
       </template>
@@ -806,42 +981,45 @@ function displayName(p: PluginInfo): string {
     </div>
   </div>
 
-  <!-- ============ MOD 安装结果弹窗 ============ -->
-  <div v-if="modResult" class="mask" @click.self="modResult = null">
+  <!-- ============ 插件库操作结果弹窗 ============ -->
+  <div v-if="libFeedback" class="mask" @click.self="libFeedback = null">
     <div class="dialog mod-result-dialog">
       <div class="dialog-head">
-        <span>📦 MOD 安装结果</span>
-        <button class="icon-btn" @click="modResult = null">✕</button>
+        <span>📦 插件库操作结果</span>
+        <button class="icon-btn" @click="libFeedback = null">✕</button>
       </div>
       <div class="mod-result-body">
-        <div v-if="modResult.installed.length" class="mod-result-group ok">
-          <div class="mod-result-title">✅ 已安装 {{ modResult.installed.length }} 个插件</div>
-          <div v-for="(it, i) in modResult.installed" :key="'i' + i" class="mod-result-row">
+        <div v-if="libFeedback.ok.length" class="mod-result-group ok">
+          <div class="mod-result-title">✅ 成功 {{ libFeedback.ok.length }} 项</div>
+          <div v-for="(it, i) in libFeedback.ok" :key="'i' + i" class="mod-result-row">
             <span class="mono">{{ it.fileName }}</span>
             <span class="dim">→ {{ it.message }}</span>
           </div>
         </div>
-        <div v-if="modResult.ignored.length" class="mod-result-group warn">
-          <div class="mod-result-title">⏭ 已跳过 {{ modResult.ignored.length }} 项</div>
-          <div v-for="(it, i) in modResult.ignored" :key="'g' + i" class="mod-result-row">
+        <div v-if="libFeedback.warn.length" class="mod-result-group warn">
+          <div class="mod-result-title">⏭ 已跳过 {{ libFeedback.warn.length }} 项</div>
+          <div v-for="(it, i) in libFeedback.warn" :key="'g' + i" class="mod-result-row">
             <span class="mono">{{ it.fileName }}</span>
             <span class="dim">· {{ it.message }}</span>
           </div>
         </div>
-        <div v-if="modResult.failed.length" class="mod-result-group bad">
-          <div class="mod-result-title">❌ 失败 {{ modResult.failed.length }} 项</div>
-          <div v-for="(it, i) in modResult.failed" :key="'f' + i" class="mod-result-row">
+        <div v-if="libFeedback.bad.length" class="mod-result-group bad">
+          <div class="mod-result-title">❌ 失败 {{ libFeedback.bad.length }} 项</div>
+          <div v-for="(it, i) in libFeedback.bad" :key="'f' + i" class="mod-result-row">
             <span class="mono">{{ it.fileName }}</span>
             <span class="dim">· {{ it.message }}</span>
           </div>
         </div>
-        <div v-if="!modResult.installed.length && !modResult.ignored.length && !modResult.failed.length" class="dim">
+        <div
+          v-if="!libFeedback.ok.length && !libFeedback.warn.length && !libFeedback.bad.length"
+          class="dim"
+        >
           未处理任何文件
         </div>
       </div>
       <div class="dialog-foot">
-        <span class="dim">装完即可从 Steam 启动游戏生效</span>
-        <button class="btn-primary" @click="modResult = null">好的</button>
+        <span class="dim">从插件库拖入档案的插件，Steam 启动游戏即生效</span>
+        <button class="btn-primary" @click="libFeedback = null">好的</button>
       </div>
     </div>
   </div>
@@ -1280,45 +1458,187 @@ function displayName(p: PluginInfo): string {
   background: #6b7280;
 }
 
-/* MOD 拖拽安装区 */
-.drop-zone {
-  margin: 0 22px 10px;
+/* 左右分栏：插件库 + 当前档案 */
+.split-main {
+  flex: 1;
+  min-height: 0;
   display: flex;
-  align-items: center;
   gap: 14px;
-  padding: 14px 18px;
-  border: 2px dashed #3a4250;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.02);
-  transition: border-color 0.15s ease, background 0.15s ease;
-  cursor: pointer;
+  padding: 0 22px 18px;
 }
-.drop-zone:hover {
-  border-color: #4c9aff;
-  background: rgba(76, 154, 255, 0.06);
-}
-.drop-zone.over {
-  border-color: #4c9aff;
-  background: rgba(76, 154, 255, 0.14);
-}
-.drop-zone.busy {
-  opacity: 0.6;
-  cursor: wait;
-}
-.drop-icon {
-  font-size: 26px;
-  flex-shrink: 0;
-}
-.drop-text {
+.lib-pane,
+.profile-pane {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  font-size: 13px;
+  background: #171b21;
+  border: 1px solid #272c35;
+  border-radius: 12px;
+  overflow: hidden;
 }
-.drop-help {
+.pane-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 14px;
+  border-bottom: 1px solid #272c35;
+  background: #1b1f26;
+}
+.pane-title {
+  font-weight: 700;
+  font-size: 13.5px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pane-head-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+.btn-plain.mini {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+.dim.mini {
+  font-size: 11.5px;
+}
+
+/* 拖放提示条 */
+.lib-drop-tip,
+.profile-drop-tip {
+  margin: 10px 12px 4px;
+  padding: 9px 12px;
+  border: 1.5px dashed #3a4250;
+  border-radius: 10px;
+  font-size: 12.5px;
+  text-align: center;
+  color: #9aa4b2;
+  transition: border-color 0.15s ease, background 0.15s ease;
   flex-shrink: 0;
+}
+.lib-drop-tip.over,
+.profile-drop-tip.over {
+  border-color: #4c9aff;
+  background: rgba(76, 154, 255, 0.12);
+  color: #cfe3ff;
+}
+.lib-drop-tip.busy {
+  opacity: 0.6;
+}
+
+/* 插件库卡片网格 */
+.lib-grid {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px 14px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 10px;
+  align-content: start;
+}
+.lib-card {
+  background: #1b1f26;
+  border: 1px solid #272c35;
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: grab;
+  transition: border-color 0.12s ease, transform 0.12s ease, opacity 0.12s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  user-select: none;
+}
+.lib-card:hover {
+  border-color: #4c9aff;
+  transform: translateY(-1px);
+}
+.lib-card:active {
+  cursor: grabbing;
+}
+.lib-card.installed {
+  border-color: rgba(63, 185, 80, 0.4);
+  background: rgba(63, 185, 80, 0.05);
+}
+.lib-card-top {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.lib-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+.lib-name {
+  font-weight: 700;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lib-card-meta {
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lib-card-actions {
+  display: flex;
+  align-items: center;
+  min-height: 22px;
+}
+.lib-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+}
+
+/* 右栏插件列表（现有样式微调） */
+.profile-pane .plugin-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px;
+}
+.profile-pane .plugin-card {
+  cursor: grab;
+}
+.profile-pane .plugin-card:active {
+  cursor: grabbing;
+}
+.profile-pane .center-box {
+  padding: 40px 10px;
+}
+
+/* 删除区 */
+.trash-zone {
+  flex-shrink: 0;
+  margin: 4px 12px 12px;
+  padding: 10px 12px;
+  border: 1.5px dashed #3a4250;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: #9aa4b2;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+.trash-zone.over {
+  border-color: #e03131;
+  background: rgba(224, 49, 49, 0.12);
+  color: #ffb3b3;
+}
+.trash-icon {
+  font-size: 16px;
 }
 
 /* MOD 安装结果弹窗 */

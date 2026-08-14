@@ -42,17 +42,19 @@ export interface BepInExInfo {
   version: string | null
 }
 
-/** 单个插件（dll） */
+/** 单个插件（条目粒度：一个 mod = 一个文件或目录，可含多个 dll） */
 export interface PluginInfo {
-  /** 唯一 id：相对 plugins 目录的路径（含文件名） */
+  /** 唯一 id：相对 plugins 目录的顶层条目名（文件或目录名） */
   id: string
-  /** dll 文件名 */
+  /** 条目名（顶层文件/目录名） */
   fileName: string
-  /** 相对 plugins 目录路径（子目录 + 文件名） */
+  /** 相对 plugins 目录的顶层条目路径 */
   relPath: string
-  /** 绝对路径 */
+  /** 条目绝对路径（文件或目录） */
   fullPath: string
-  /** 文件大小（字节） */
+  /** 条目内主 dll 的绝对路径（元数据/cfg 关联用；无 dll 时为 null） */
+  mainDllPath: string | null
+  /** 条目总大小（字节） */
   sizeBytes: number
   /** 是否启用（位于 plugins 目录内） */
   enabled: boolean
@@ -176,6 +178,43 @@ export interface ModInstallResult {
   failed: ModInstallItem[]
 }
 
+/** 插件库条目（一个 mod：文件或目录） */
+export interface LibraryEntry {
+  /** 条目相对路径（_library 下，顶层文件名或目录名） */
+  relPath: string
+  /** 显示名（主 dll 元数据名称优先，否则条目名） */
+  name: string
+  /** 是否为目录条目 */
+  isDir: boolean
+  /** 条目总大小 */
+  sizeBytes: number
+  /** 主 dll 元数据（无 dll / 解析失败为 null） */
+  meta: PluginMetadata | null
+  /** 元数据解析失败原因 */
+  metaError: string | null
+  /** 主 dll 文件名（cfg 关联用） */
+  mainDllName: string | null
+  /** 当前档案是否已装入 */
+  installed: boolean
+}
+
+/** 插件库扫描结果 */
+export interface LibraryScanResult {
+  /** 库目录绝对路径 */
+  libraryDir: string
+  entries: LibraryEntry[]
+  /** 本次自动收集的现有插件数（首次迁移提示） */
+  collected: number
+}
+
+/** 插件库添加文件结果 */
+export interface LibraryAddResult {
+  added: ModInstallItem[]
+  updated: ModInstallItem[]
+  ignored: ModInstallItem[]
+  failed: ModInstallItem[]
+}
+
 /** IPC 通道常量（主进程 ipcMain.handle 与 preload 共用） */
 export const IPC = {
   /** 发现游戏列表 */
@@ -215,5 +254,13 @@ export const IPC = {
   /** 在文件管理器中打开插件库目录 */
   pluginsRootOpen: 'plugins-root:open',
   /** 拖拽安装 MOD（dll / zip 直接装入当前档案 plugins） */
-  installMods: 'mods:install'
+  installMods: 'mods:install',
+  /** 扫描游戏插件库（首次自动收集现有插件） */
+  libraryScan: 'library:scan',
+  /** 添加文件到插件库（dll / zip） */
+  libraryAdd: 'library:add',
+  /** 复制库条目到当前档案 plugins（装入档案） */
+  libraryToProfile: 'library:to-profile',
+  /** 从当前档案移除条目（插件库保留） */
+  profileRemoveEntry: 'profile:remove-entry'
 } as const

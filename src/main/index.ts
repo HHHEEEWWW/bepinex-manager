@@ -6,7 +6,12 @@ import { IPC } from '@shared/types'
 import { discoverGames, addManualGame } from './core/games'
 import { detectBepInEx } from './core/bepinex'
 import { scanPlugins, setPluginEnabled } from './core/plugins'
-import { installModsToGame } from './core/modinstall'
+import {
+  scanLibrary,
+  addFilesToLibrary,
+  copyEntryToProfile,
+  removeEntryFromProfile
+} from './core/library'
 import { listBepInExReleases, installBepInExToLibrary } from './core/installer'
 import { readLog, LogReadResult } from './core/logparser'
 import {
@@ -204,9 +209,18 @@ function registerIpcHandlers(): void {  // 发现游戏（Steam 库 + 手动）
     return err === '' ? true : Promise.reject(new Error(err))
   })
 
-  // 拖拽安装 MOD（.dll / .zip → 当前档案 plugins）
-  ipcMain.handle(IPC.installMods, (_e, gameDir: string, filePaths: string[]) =>
-    installModsToGame(gameDir, filePaths)
+  // ---- 插件库（隔离模式，按游戏分类的共享插件池） ----
+  ipcMain.handle(IPC.libraryScan, (_e, gameDir: string, gameName: string) =>
+    scanLibrary(gameDir, gameName)
+  )
+  ipcMain.handle(IPC.libraryAdd, (_e, gameDir: string, filePaths: string[]) =>
+    addFilesToLibrary(gameDir, filePaths)
+  )
+  ipcMain.handle(IPC.libraryToProfile, (_e, gameDir: string, gameName: string, relPath: string) =>
+    copyEntryToProfile(gameDir, gameName, relPath)
+  )
+  ipcMain.handle(IPC.profileRemoveEntry, (_e, gameDir: string, gameName: string, relPath: string) =>
+    removeEntryFromProfile(gameDir, gameName, relPath)
   )
 
   // ---- BepInEx 安装 ----

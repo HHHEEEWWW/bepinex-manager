@@ -9,7 +9,7 @@
  * 该方案跨 BepInEx 5/6 兼容，不修改任何游戏文件。
  */
 import { existsSync, mkdirSync, readdirSync, renameSync, statSync } from 'fs'
-import { join, relative, dirname } from 'path'
+import { join, dirname } from 'path'
 import type { BepInExInfo, GameScanResult, PluginConflict, PluginInfo } from '@shared/types'
 import { resolvePluginMetadata } from './metadata'
 import { getModNote } from './modnotes'
@@ -25,13 +25,13 @@ export function disabledDirOf(bepinex: BepInExInfo): string {
   return join(bepinex.rootDir, DISABLED_DIR_NAME)
 }
 
-/** 扫描一个游戏的插件列表（启用 + 禁用合并） */
+/** 扫描一个游戏的插件列表（启用 + 禁用合并，条目粒度：一个 mod = 一个顶层文件/目录） */
 export function scanPlugins(bepinex: BepInExInfo): GameScanResult {
   const pluginsDir = bepinex.pluginsDir
   const disabledDir = disabledDirOf(bepinex)
 
-  const enabled: PluginInfo[] = collectDlls(pluginsDir, pluginsDir, true)
-  const disabled: PluginInfo[] = collectDlls(disabledDir, disabledDir, false)
+  const enabled: PluginInfo[] = collectEntries(pluginsDir, true)
+  const disabled: PluginInfo[] = collectEntries(disabledDir, false)
 
   const all = [...enabled, ...disabled]
   // 解析元数据（批量一次调用，dll 多时也能接受）
@@ -130,41 +130,88 @@ export function setPluginEnabled(bepinex: BepInExInfo, pluginId: string, enabled
   return enabled
 }
 
-/** 收集目录下所有 dll（递归，忽略隐藏目录） */
-function collectDlls(rootDir: string, baseDir: string, enabled: boolean): PluginInfo[] {
+/** 收集目录下所有插件条目（顶层文件 dll 或目录，忽略隐藏/禁用目录） */
+function collectEntries(rootDir: string, enabled: boolean): PluginInfo[] {
   if (!existsSync(rootDir)) return []
   const result: PluginInfo[] = []
-  const walk = (dir: string): void => {
+  let items
+  try {
+    items = readdirSync(rootDir, { withFileTypes: true })
+  } catch {
+    return result
+  }
+  for (const item of items) {
+    if (item.name.startsWith('.') || item.name === DISABLED_DIR_NAME) continue
+    const full = join(rootDir, item.name)
+    const isDir = item.isDirectory()
+    // 顶层散文件只收 dll；目录整体视为一个插件条目
+    if (!isDir && !item.name.toLowerCase().endsWith('.dll')) continue
+    result.push({
+      id: item.name,
+      fileName: item.name,
+      relPath: item.name,
+      fullPath: full,
+      mainDllPath: findMainDll(full, isDir),
+      sizeBytes: dirSize(full),
+      enabled,
+      meta: null,
+      configFile: null,
+      note: null,
+      metaError: null
+    })
+  }
+  return result
+}
+
+/**
+ * 条目内主 dll：目录 → 顶层优先取第一个 dll，顶层没有再递归子目录；
+ * 文件 → 自身（须为 dll）。
+ */
+export function findMainDll(entryPath: string, isDir: boolean): string | null {
+  if (!isDir) {
+    return entryPath.toLowerCase().endsWith('.dll') ? entryPath : null
+  }
+  const walk = (dir: string, deep: boolean): string | null => {
     let items
     try {
       items = readdirSync(dir, { withFileTypes: true })
     } catch {
-      return
+      return null
     }
-    for (const item of items) {
-      if (item.name.startsWith('.') || item.name === DISABLED_DIR_NAME) continue
-      const full = join(dir, item.name)
-      if (item.isDirectory()) {
-        walk(full)
-      } else if (item.name.toLowerCase().endsWith('.dll')) {
-        const rel = relative(baseDir, full).replace(/\\/g, '/')
-        result.push({
-          id: rel,
-          fileName: item.name,
-          relPath: rel,
-          fullPath: full,
-          sizeBytes: statSync(full).size,
-          enabled,
-          meta: null,
-          configFile: null,
-          note: null,
-          metaError: null
-        })
+    // 顶层扫描
+    for (const it of items) {
+      if (it.isFile() && it.name.toLowerCase().endsWith('.dll')) return join(dir, it.name)
+    }
+    if (!deep) return null
+    for (const it of items) {
+      if (it.isDirectory() && !it.name.startsWith('.')) {
+        const hit = walk(join(dir, it.name), true)
+        if (hit) return hit
       }
     }
+    return null
   }
-  walk(rootDir)
-  return result
+  return walk(entryPath, true)
+}
+
+/** 文件或目录总大小 */
+export function dirSize(target: string): number {
+  try {
+    const st = statSync(target)
+    if (st.isFile()) return st.size
+    let total = 0
+    const walk = (dir: string): void => {
+      for (const it of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, it.name)
+        if (it.isDirectory()) walk(full)
+        else if (it.isFile()) total += statSync(full).size
+      }
+    }
+    walk(target)
+    return total
+  } catch {
+    return 0
+  }
 }
 
 /** 目录路径 → 稳定 id */

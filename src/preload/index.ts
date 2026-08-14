@@ -5,7 +5,8 @@ import type {
   BepInExRelease,
   LogReadResult,
   IsolatedProfileInfo,
-  ModInstallResult
+  LibraryAddResult,
+  LibraryScanResult
 } from '../shared/types'
 import { IPC } from '../shared/types'
 
@@ -47,10 +48,19 @@ const api = {
   /** 在文件管理器中打开目录 */
   openPath: (dir: string): Promise<boolean> => ipcRenderer.invoke(IPC.pluginsRootOpen, dir),
 
-  // ---- MOD 拖拽安装 ----
-  /** 拖拽安装 MOD（.dll / .zip）到当前档案 plugins 目录 */
-  installMods: (gameDir: string, filePaths: string[]): Promise<ModInstallResult> =>
-    ipcRenderer.invoke(IPC.installMods, gameDir, filePaths),
+  // ---- 插件库（隔离模式） ----
+  /** 扫描游戏插件库（首次自动收集现有档案插件） */
+  libraryScan: (gameDir: string, gameName: string): Promise<LibraryScanResult> =>
+    ipcRenderer.invoke(IPC.libraryScan, gameDir, gameName),
+  /** 添加文件到插件库（.dll / .zip，zip 自动解压条目化） */
+  libraryAdd: (gameDir: string, filePaths: string[]): Promise<LibraryAddResult> =>
+    ipcRenderer.invoke(IPC.libraryAdd, gameDir, filePaths),
+  /** 复制库条目到当前档案 plugins（装入档案，重名覆盖） */
+  libraryToProfile: (gameDir: string, gameName: string, relPath: string): Promise<string> =>
+    ipcRenderer.invoke(IPC.libraryToProfile, gameDir, gameName, relPath),
+  /** 从当前档案移除条目（插件库保留） */
+  profileRemoveEntry: (gameDir: string, gameName: string, relPath: string): Promise<boolean> =>
+    ipcRenderer.invoke(IPC.profileRemoveEntry, gameDir, gameName, relPath),
   /** 从拖拽的 File 对象取真实磁盘路径（Electron 37：File.path 已移除，必须用 webUtils） */
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),
 

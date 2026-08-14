@@ -82,7 +82,13 @@ function ensureTool(): boolean {
 /** 批量解析插件元数据（就地写入 plugins 的 meta/metaError 字段） */
 export function resolvePluginMetadata(plugins: PluginInfo[], bepinex: BepInExInfo): void {
   if (plugins.length === 0) return
-  const dlls = plugins.map((p) => p.fullPath)
+  // 条目粒度：主 dll 优先（mainDllPath），否则条目自身（单 dll 文件）
+  const dllPaths = plugins.map((p) => p.mainDllPath ?? p.fullPath)
+  const dlls = dllPaths.filter((p): p is string => !!p)
+  if (dlls.length === 0) {
+    for (const p of plugins) p.metaError = '插件条目内未找到 dll'
+    return
+  }
   if (!ensureTool()) {
     for (const p of plugins) p.metaError = 'C# 元数据解析工具不可用（需要 .NET SDK 或预构建产物）'
     return
@@ -131,7 +137,7 @@ export function resolvePluginMetadata(plugins: PluginInfo[], bepinex: BepInExInf
     }
 
     for (const p of plugins) {
-      const hit = byPath.get(p.fullPath)
+      const hit = byPath.get(p.mainDllPath ?? p.fullPath)
       p.meta = hit?.meta ?? null
       p.metaError = hit?.error ?? null
     }

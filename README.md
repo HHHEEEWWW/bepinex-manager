@@ -14,9 +14,11 @@
 - ✅ **一键安装**：从 GitHub 官方 release 下载 BepInEx（5 稳定版 + 6.x pre），按 Mono/IL2CPP 自动过滤资产，
   直装插件库并自动创建「默认」档案，进度条 + 24h 本地缓存 + 网页回退（releases.atom + expanded_assets，不受 API 限流）
 - ✅ **迁入插件库**：已直装 BepInEx 的游戏一键迁移为隔离模式（原目录自动清理，失败自动回滚）
+- ✅ **插件库 + 档案**：插件库按游戏分类存放该游戏全部插件（`_library/`），游戏详情左右分栏——
+  左栏插件库（选项卡可拖拽，外部 .dll/.zip 拖入即入库），右栏当前档案插件区（库条目拖入=装入档案，
+  拖到删除区=从档案移除、库保留）；首次扫描自动把各档案现有插件收集进库（幂等）
 - ✅ **插件管理**：启用/禁用（`plugins` ↔ `plugins-disabled` 目录移动，不污染游戏文件）、GUID 元数据、版本、大小
-- ✅ **拖拽安装 MOD**：把 `.dll` 或 `.zip` 拖进游戏详情页即自动装入当前档案（zip 自动解压提取插件，
-  路径穿越/危险可执行文件双重拦截，重名自动覆盖更新，装完即刷新）
+- ✅ **拖拽安全**：zip 自动解压条目化，路径穿越（zip-slip）/危险可执行文件双重拦截，条目数/大小上限，重名覆盖更新
 - ✅ **元数据解析**：C# 辅助工具（MetadataLoadContext 只读反射，不执行插件代码）批量提取
   `BepInPlugin` / `BepInDependency` 特性 → GUID、名称、版本、依赖清单
 - ✅ **依赖检查**：自动标出缺失依赖的插件
@@ -54,7 +56,8 @@ bepinex-manager/
 │  │  └─ core/            #   核心逻辑（纯 Node，可独立测试）
 │  │     ├─ games.ts      #     Steam 库扫描 / 手动添加
 │  │     ├─ bepinex.ts    #     BepInEx 版本检测
-│  │     ├─ plugins.ts    #     插件扫描与启停
+│  │     ├─ plugins.ts    #     插件扫描与启停（条目粒度）
+│  │     ├─ library.ts    #     插件库（入库/条目化/装入档案/自动收集）
 │  │     └─ metadata.ts   #     调用 C# 工具解析元数据
 │  ├─ preload/            # contextBridge 安全桥
 │  ├─ renderer/           # Vue 3 UI（游戏列表 + 插件管理 + 配置编辑）
@@ -85,9 +88,9 @@ pnpm release:tool
 pnpm exec esbuild scripts/verify-core.ts --bundle --platform=node --format=cjs --outfile=scripts/verify-core.cjs --alias:@shared=./src/shared
 node scripts/verify-core.cjs
 
-# MOD 拖拽安装逻辑验证（15 项断言）
-node node_modules/.pnpm/esbuild@*/node_modules/esbuild/bin/esbuild scripts/verify-modinstall.ts --bundle --platform=node --format=cjs --outfile=scripts/verify-modinstall.cjs --alias:@shared=./src/shared --external:adm-zip
-node scripts/verify-modinstall.cjs
+# MOD 拖拽安装逻辑验证（25 项断言）
+node node_modules/.pnpm/esbuild@版本/node_modules/esbuild/bin/esbuild scripts/verify-library.ts --bundle --platform=node --format=cjs --outfile=scripts/verify-library.cjs --alias:@shared=./src/shared --external:adm-zip
+node scripts/verify-library.cjs
 ```
 
 ## 核心设计说明
