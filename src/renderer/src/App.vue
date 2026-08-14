@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
 import { createDiscreteApi, darkTheme } from 'naive-ui'
+import { parseCfg, serializeCfg, type CfgDocument } from '@shared/cfgparser'
 import type {
   GameEntry,
   GameScanResult,
@@ -35,7 +36,13 @@ const installProgress = ref<{ phase: string; percent: number; message: string } 
 const installBusy = ref(false)
 
 // ---- 配置编辑器 ----
-const configEditor = ref<{ plugin: PluginInfo; content: string; saving: boolean } | null>(null)
+const configEditor = ref<{
+  plugin: PluginInfo
+  view: 'form' | 'text'
+  text: string
+  doc: CfgDocument | null
+  saving: boolean
+} | null>(null)
 
 // ---- 日志面板 ----
 const showLogModal = ref(false)
@@ -185,7 +192,22 @@ async function openConfig(p: PluginInfo): Promise<void> {
   if (!p.configFile) return
   try {
     const content = await window.api.readConfigFile(p.configFile)
-    configEditor.value = { plugin: p, content, saving: false }
+    let doc: CfgDocument | null = null
+    try {
+      doc = parseCfg(content)
+      // 解析失败（空/非标准格式）时回退文本模式
+      if (doc.sections.length === 0 && doc.headerLines.length === 0) doc = null
+    } catch {
+      doc = null
+    }
+    configEditor.value = {
+      plugin: p,
+      view: doc ? 'form' : 'text',
+      text: content,
+      doc,
+      saving: false
+    }
+    if (!doc) message.info('该配置无法表单化（可能为空或格式特殊），已切换到文本模式')
   } catch (e) {
     message.error(`读取配置失败: ${e}`)
   }
@@ -196,7 +218,8 @@ async function saveConfig(): Promise<void> {
   const ed = configEditor.value
   ed.saving = true
   try {
-    await window.api.writeConfigFile(ed.plugin.configFile!, ed.content)
+    const content = ed.view === 'form' && ed.doc ? serializeCfg(ed.doc) : ed.text
+    await window.api.writeConfigFile(ed.plugin.configFile!, content)
     ed.saving = false
     configEditor.value = null
     message.success('配置已保存，游戏重启后生效')
@@ -503,13 +526,73 @@ function displayName(p: PluginInfo): string {
     <div class="dialog cfg-dialog">
       <div class="dialog-head">
         <span>⚙ {{ displayName(configEditor.plugin) }} — 配置</span>
-        <button class="icon-btn" @click="configEditor = null">✕</button>
+        <div class="cfg-head-right">
+          <button
+            v-if="configEditor.doc"
+            class="btn-plain"
+            @click="configEditor.view = configEditor.view === 'form' ? 'text' : 'form'"
+          >
+            {{ configEditor.view === 'form' ? '文本模式' : '表单模式' }}
+          </button>
+          <button class="icon-btn" @click="configEditor = null">✕</button>
+        </div>
       </div>
+
+      <!-- 表单视图 -->
+      <div v-if="configEditor.view === 'form' && configEditor.doc" class="cfg-form">
+        <div v-for="(section, si) in configEditor.doc.sections" :key="si" class="cfg-section">
+          <div v-if="section.name" class="cfg-section-title">{{ section.name }}</div>
+          <div v-for="(e, ei) in section.entries" :key="ei" class="cfg-entry">
+            <div class="cfg-entry-info">
+              <div class="cfg-entry-key mono">{{ e.key }}</div>
+              <div
+                v-for="(c, ci) in e.comments.filter((x) => !x.trim().startsWith('#'))"
+                :key="ci"
+                class="cfg-entry-comment dim"
+              >
+                {{ c }}
+              </div>
+            </div>
+            <div class="cfg-entry-control">
+              <!-- Boolean -->
+              <button
+                v-if="e.settingType === 'Boolean'"
+                class="mini-switch"
+                :class="e.value === 'true' ? 'on' : 'off'"
+                @click="e.value = e.value === 'true' ? 'false' : 'true'"
+              >
+                {{ e.value === 'true' ? '开' : '关' }}
+              </button>
+              <!-- Enum -->
+              <select v-else-if="e.acceptableValues" v-model="e.value" class="cfg-select">
+                <option v-for="v in e.acceptableValues" :key="v" :value="v">{{ v }}</option>
+              </select>
+              <!-- 数值 -->
+              <input
+                v-else-if="e.settingType === 'Int32' || e.settingType === 'Single'"
+                v-model="e.value"
+                type="text"
+                inputmode="decimal"
+                class="cfg-input mono"
+              />
+              <!-- 字符串/未知 -->
+              <input v-else v-model="e.value" type="text" class="cfg-input mono" />
+            </div>
+          </div>
+        </div>
+        <div v-if="configEditor.doc.sections.length === 0" class="center-box slim">
+          <div class="center-text dim">该配置文件没有可编辑条目</div>
+        </div>
+      </div>
+
+      <!-- 文本视图 -->
       <textarea
-        v-model="configEditor.content"
+        v-else
+        v-model="configEditor.text"
         class="cfg-editor mono"
         spellcheck="false"
       ></textarea>
+
       <div class="dialog-foot">
         <span class="dim">修改后需重启游戏生效</span>
         <button class="btn-primary" :disabled="configEditor.saving" @click="saveConfig">
@@ -1246,6 +1329,103 @@ function displayName(p: PluginInfo): string {
   font-size: 13px;
   line-height: 1.55;
   user-select: text;
+}
+
+/* 配置表单视图 */
+.cfg-head-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cfg-form {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 16px 16px;
+}
+.cfg-section {
+  margin-bottom: 14px;
+}
+.cfg-section-title {
+  font-weight: 700;
+  font-size: 13px;
+  color: #7cb3ff;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  background: rgba(76, 154, 255, 0.07);
+  border-left: 3px solid #4c9aff;
+  border-radius: 0 6px 6px 0;
+}
+.cfg-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.cfg-entry:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+.cfg-entry-info {
+  min-width: 0;
+  flex: 1;
+}
+.cfg-entry-key {
+  font-size: 12.5px;
+  color: #e8eaee;
+  word-break: break-all;
+}
+.cfg-entry-comment {
+  font-size: 11.5px;
+  margin-top: 2px;
+  word-break: break-all;
+}
+.cfg-entry-control {
+  flex-shrink: 0;
+}
+.mini-switch {
+  min-width: 58px;
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid;
+  transition: all 0.12s ease;
+}
+.mini-switch.on {
+  color: #fff;
+  background: #4c9aff;
+  border-color: #4c9aff;
+}
+.mini-switch.off {
+  color: #8b93a1;
+  background: transparent;
+  border-color: #3a3f4b;
+}
+.cfg-select {
+  background: #12151a;
+  border: 1px solid #343a46;
+  color: #e8eaee;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  outline: none;
+  min-width: 150px;
+}
+.cfg-input {
+  background: #12151a;
+  border: 1px solid #343a46;
+  color: #e8eaee;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  outline: none;
+  min-width: 150px;
+  transition: border-color 0.12s ease;
+}
+.cfg-input:focus {
+  border-color: #4c9aff;
 }
 
 /* 安装弹窗内容 */
