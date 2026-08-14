@@ -9,7 +9,7 @@
  *       （版本号用 pnpm 安装的实际 esbuild 版本替换；注意本注释不能含星号斜杠序列）
  *       node scripts/verify-library.cjs
  */
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import AdmZip from 'adm-zip'
@@ -156,13 +156,20 @@ writeFileSync(directDll, 'MZ-direct-mod-v2')
 const addRes2 = addFilesToLibrary(gameDir, [directDll])
 check('重名标记 updated', addRes2.updated.some((i) => i.fileName === 'DirectMod.dll'), JSON.stringify(addRes2.updated))
 
-// ---- 严格幂等：同名不同大小也不建副本 ----
-console.log('== 收集严格幂等 ==')
-// 修改档案里的 FakeMod.dll（模拟用户更新插件后大小变化）
-writeFileSync(join(bepDir, 'plugins', 'FakeMod.dll'), 'MZ-fake-mod-UPDATED-VERSION')
+// ---- 收集同步：内容不同 → 覆盖更新；内容相同 → 幂等跳过 ----
+console.log('== 收集同步（内容指纹） ==')
+// 模拟插件升级：改档案 FakeMod.dll 为"同大小不同内容"（如 0.5.2 → 0.5.5 恰好同大小）
+const vOld = 'MZ-fake-mod-V1!!!'
+const vNew = 'MZ-fake-mod-V2!!!'
+check('新旧版本同大小', vOld.length === vNew.length, `old=${vOld.length} new=${vNew.length}`)
+writeFileSync(join(bepDir, 'plugins', 'FakeMod.dll'), vNew)
 const scan3 = scanLibrary(gameDir, gameName)
-check('更新后刷新不产生副本', scan3.collected === 0, `collected=${scan3.collected}`)
+check('内容不同 → 更新库', scan3.updated >= 1, `updated=${scan3.updated}`)
+check('库内容已同步新版本', readFileSync(join(libDir!, 'FakeMod.dll'), 'utf8') === vNew)
 check('无 -2 副本条目', !scan3.entries.some((e) => e.relPath.includes('-2')), JSON.stringify(scan3.entries.map((e) => e.relPath)))
+// 再次扫描：内容已相同 → 不再更新（无震荡）
+const scan3b = scanLibrary(gameDir, gameName)
+check('内容相同 → 幂等跳过', scan3b.updated === 0 && scan3b.collected === 0, `updated=${scan3b.updated} collected=${scan3b.collected}`)
 
 // ---- 库条目删除 ----
 console.log('== removeLibraryEntry ==')

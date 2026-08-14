@@ -20,11 +20,13 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
+  readFileSync,
   rmSync,
   statSync,
   writeFileSync
 } from 'fs'
 import { basename, dirname, extname, join, resolve, sep } from 'path'
+import { createHash } from 'crypto'
 import AdmZip from 'adm-zip'
 import { detectBepInEx } from './bepinex'
 import { currentIsolatedProfile, profileDir } from './isolation'
@@ -89,7 +91,7 @@ export function scanLibrary(gameDir: string, gameName: string): LibraryScanResul
   if (!libDir) throw new Error('游戏不在隔离模式：请先安装 BepInEx 或迁入插件库')
   mkdirSync(libDir, { recursive: true })
 
-  const collected = collectExistingToLibrary(libDir)
+  const sync = collectExistingToLibrary(libDir, gameDir, gameName)
 
   const entries: LibraryEntry[] = []
   if (existsSync(libDir)) {
@@ -157,25 +159,40 @@ export function scanLibrary(gameDir: string, gameName: string): LibraryScanResul
 
   entries.sort((a, b) => (a.installed === b.installed ? a.name.localeCompare(b.name, 'zh') : a.installed ? -1 : 1))
 
-  return { libraryDir: libDir, entries, collected }
+  return { libraryDir: libDir, entries, collected: sync.added, updated: sync.updated }
 }
 
 /**
- * 幂等收集：把各档案 plugins / plugins-disabled 顶层条目复制进库。
- * 规则（严格幂等，多次刷新/多次拖入绝不产生副本）：
- *   - 同名条目已存在（无论内容是否相同）→ 一律跳过，以先收集的为准
- *   - 空目录 / 空文件 → 不收集
- *   - 仅当库中不存在同名条目时才复制
+ * 幂等收集：把各档案 plugins / plugins-disabled 顶层条目同步进库。
+ * 规则（绝不产生 -2/-3 副本，库始终跟随档案最新内容）：
+ *   - 同名条目不存在 → 新增复制
+ *   - 同名条目内容相同（SHA-256 指纹）→ 跳过
+ *   - 同名条目内容不同（插件升级）→ 覆盖更新，以档案版本为准
+ *   - 当前生效档案最后处理（版本优先），空目录/空文件不收集
+ * 返回 { added, updated }
  */
-export function collectExistingToLibrary(libDir: string): number {
+export function collectExistingToLibrary(
+  libDir: string,
+  gameDir: string,
+  gameName: string
+): { added: number; updated: number } {
   const gameRoot = dirname(libDir)
-  if (!existsSync(gameRoot)) return 0
-  let collected = 0
+  if (!existsSync(gameRoot)) return { added: 0, updated: 0 }
+  const result = { added: 0, updated: 0 }
+
+  // 档案处理顺序：当前生效档案最后（版本优先胜出）
+  const current = currentIsolatedProfile(gameDir, gameName)
+  const profileIds: string[] = []
   for (const item of readdirSync(gameRoot, { withFileTypes: true })) {
     if (!item.isDirectory() || item.name.startsWith('.') || item.name === LIBRARY_DIR_NAME) continue
+    profileIds.push(item.name)
+  }
+  profileIds.sort((a, b) => (a === current?.id ? 1 : b === current?.id ? -1 : 0))
+
+  for (const profileId of profileIds) {
     const pluginsDirs = [
-      join(gameRoot, item.name, 'BepInEx', 'plugins'),
-      join(gameRoot, item.name, 'BepInEx', 'plugins-disabled')
+      join(gameRoot, profileId, 'BepInEx', 'plugins'),
+      join(gameRoot, profileId, 'BepInEx', 'plugins-disabled')
     ]
     for (const srcDir of pluginsDirs) {
       if (!existsSync(srcDir)) continue
@@ -191,28 +208,62 @@ export function collectExistingToLibrary(libDir: string): number {
         const src = join(srcDir, it.name)
         // 空目录/空文件不收集（无插件内容）
         if (dirSize(src) === 0) continue
-        collected += copyToLibrary(src, it.name, libDir, it.isDirectory())
+        const r = copyToLibrary(src, it.name, libDir, it.isDirectory())
+        if (r === 'added') result.added++
+        else if (r === 'updated') result.updated++
       }
     }
   }
-  return collected
+  return result
 }
 
-/** 复制单个文件/目录到库（同名去重），返回是否实际复制 */
-function copyToLibrary(src: string, name: string, libDir: string, isDir: boolean): number {
+/** 文件 SHA-256（十六进制） */
+function fileHash(p: string): string {
+  return createHash('sha256').update(readFileSync(p)).digest('hex')
+}
+
+/** 条目内容指纹：文件 = 自身哈希；目录 = 全部文件（相对名:哈希，排序后拼接） */
+function entryFingerprint(p: string, isDir: boolean): string {
+  if (!isDir) return fileHash(p)
+  const parts: string[] = []
+  const walk = (dir: string): void => {
+    let items
+    try {
+      items = readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const it of items) {
+      const full = join(dir, it.name)
+      if (it.isDirectory()) walk(full)
+      else if (it.isFile()) parts.push(`${it.name}:${fileHash(full)}`)
+    }
+  }
+  walk(p)
+  parts.sort()
+  return parts.join('|')
+}
+
+/** 复制/更新单个文件或目录到库；返回 'added' | 'updated' | 'skipped' */
+function copyToLibrary(src: string, name: string, libDir: string, isDir: boolean): 'added' | 'updated' | 'skipped' {
   const target = join(libDir, name)
-  // 同名条目已存在 → 一律跳过（无论内容，绝不产生 -2/-3 副本）
-  if (existsSync(target)) return 0
+  const existed = existsSync(target)
+  if (existed) {
+    // 内容相同 → 跳过（幂等）
+    if (entryFingerprint(src, isDir) === entryFingerprint(target, isDir)) return 'skipped'
+    // 内容不同 → 覆盖更新（档案版本胜出，绝不建 -2/-3 副本）
+    rmSync(target, { recursive: true, force: true })
+  }
   mkdirSync(libDir, { recursive: true })
   try {
     if (isDir) cpSync(src, target, { recursive: true })
     else copyFileSync(src, target)
-    return 1
+    return existed ? 'updated' : 'added'
   } catch (err) {
     console.error(`[library] 收集插件失败 ${src}:`, err)
     // 复制失败时清理可能残留的半成品目录
     if (existsSync(target)) rmSync(target, { recursive: true, force: true })
-    return 0
+    return 'skipped'
   }
 }
 

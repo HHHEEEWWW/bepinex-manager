@@ -201,8 +201,11 @@ async function refreshLibrary(): Promise<void> {
   if (!selectedGame.value || !selectedGame.value.bepinex?.isIsolated) return
   try {
     const res = await window.api.libraryScan(selectedGame.value.gameDir, selectedGame.value.name)
-    if (res.collected > 0) {
-      message.info(`已自动收集 ${res.collected} 个现有插件到插件库`)
+    if (res.collected > 0 || res.updated > 0) {
+      const parts: string[] = []
+      if (res.collected > 0) parts.push(`收集 ${res.collected} 个现有插件`)
+      if (res.updated > 0) parts.push(`更新 ${res.updated} 个插件（档案版本已同步）`)
+      message.info(`插件库已同步：${parts.join('，')}`)
     }
     library.value = res
   } catch (e) {

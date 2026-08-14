@@ -205,6 +205,8 @@ export interface LibraryScanResult {
   entries: LibraryEntry[]
   /** 本次自动收集的现有插件数（首次迁移提示） */
   collected: number
+  /** 本次自动更新的插件数（档案版本更新，已同步到库） */
+  updated: number
 }
 
 /** 插件库添加文件结果 */
