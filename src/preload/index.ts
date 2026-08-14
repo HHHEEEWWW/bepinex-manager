@@ -4,7 +4,8 @@ import type {
   GameScanResult,
   ProfileDef,
   BepInExRelease,
-  LogReadResult
+  LogReadResult,
+  IsolatedProfileInfo
 } from '../shared/types'
 import { IPC } from '../shared/types'
 
@@ -43,15 +44,15 @@ const api = {
     ipcRenderer.invoke(IPC.logsResetOffset, gameDir),
 
   // ---- 档案隔离模式 ----
-  isolationMigrate: (gameDir: string, profileName: string): Promise<{ target: string }> =>
+  isolationMigrate: (gameDir: string, profileName: string): Promise<{ profileId: string; target: string }> =>
     ipcRenderer.invoke(IPC.isolationMigrate, gameDir, profileName),
-  isolationSwitch: (gameDir: string, profileName: string): Promise<{ target: string }> =>
-    ipcRenderer.invoke(IPC.isolationSwitch, gameDir, profileName),
-  isolationRestore: (gameDir: string, profileName: string): Promise<boolean> =>
-    ipcRenderer.invoke(IPC.isolationRestore, gameDir, profileName),
-  isolationList: (gameDir: string): Promise<string[]> =>
+  isolationSwitch: (gameDir: string, profileId: string): Promise<{ target: string }> =>
+    ipcRenderer.invoke(IPC.isolationSwitch, gameDir, profileId),
+  isolationRestore: (gameDir: string, profileId: string): Promise<boolean> =>
+    ipcRenderer.invoke(IPC.isolationRestore, gameDir, profileId),
+  isolationList: (gameDir: string): Promise<IsolatedProfileInfo[]> =>
     ipcRenderer.invoke(IPC.isolationList, gameDir),
-  isolationCurrent: (gameDir: string): Promise<string | null> =>
+  isolationCurrent: (gameDir: string): Promise<IsolatedProfileInfo | null> =>
     ipcRenderer.invoke(IPC.isolationCurrent, gameDir),
 
   // ---- BepInEx 安装 ----

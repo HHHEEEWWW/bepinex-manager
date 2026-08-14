@@ -9,7 +9,8 @@ import type {
   PluginInfo,
   ProfileDef,
   BepInExRelease,
-  LogReadResult
+  LogReadResult,
+  IsolatedProfileInfo
 } from '@shared/types'
 
 const { message } = createDiscreteApi(['message'], {
@@ -51,8 +52,8 @@ const logFilter = ref<'all' | 'error' | 'warn'>('all')
 let logTimer: ReturnType<typeof setInterval> | null = null
 
 // ---- 档案隔离模式 ----
-const isolatedList = ref<string[]>([])
-const isolatedCurrent = ref<string | null>(null)
+const isolatedList = ref<IsolatedProfileInfo[]>([])
+const isolatedCurrent = ref<IsolatedProfileInfo | null>(null)
 const isolateModal = ref<{ show: boolean; name: string; busy: boolean; error: string } | null>(null)
 
 const filteredLogs = computed(() => {
@@ -144,12 +145,12 @@ async function doMigrate(): Promise<void> {
   }
 }
 
-async function doSwitchIsolated(name: string): Promise<void> {
+async function doSwitchIsolated(p: IsolatedProfileInfo): Promise<void> {
   if (!selectedGame.value) return
   try {
-    await window.api.isolationSwitch(selectedGame.value.gameDir, name)
-    message.success(`已切换到档案「${name}」，下次启动游戏生效`)
-    isolatedCurrent.value = name
+    await window.api.isolationSwitch(selectedGame.value.gameDir, p.id)
+    message.success(`已切换到档案「${p.name}」，下次启动游戏生效`)
+    isolatedCurrent.value = p
     scan.value = await window.api.scanGame(selectedGame.value.gameDir)
   } catch (e) {
     message.error(String(e))
@@ -158,9 +159,10 @@ async function doSwitchIsolated(name: string): Promise<void> {
 
 async function doRestore(): Promise<void> {
   if (!selectedGame.value || !isolatedCurrent.value) return
-  if (!confirm(`将档案「${isolatedCurrent.value}」还原为常规模式？（BepInEx 复制回游戏目录，档案保留）`)) return
+  const cur = isolatedCurrent.value
+  if (!confirm(`将档案「${cur.name}」还原为常规模式？（BepInEx 复制回游戏目录，档案保留）`)) return
   try {
-    await window.api.isolationRestore(selectedGame.value.gameDir, isolatedCurrent.value)
+    await window.api.isolationRestore(selectedGame.value.gameDir, cur.id)
     message.success('已还原到游戏目录')
     await refreshGames()
   } catch (e) {
@@ -493,14 +495,14 @@ function displayName(p: PluginInfo): string {
               <span class="bar-label">🔒 档案</span>
               <template v-if="isolatedList.length">
                 <button
-                  v-for="name in isolatedList"
-                  :key="name"
+                  v-for="p in isolatedList"
+                  :key="p.id"
                   class="profile-chip"
-                  :class="{ active: isolatedCurrent === name }"
-                  :title="isolatedCurrent === name ? '当前生效档案' : '点击切换（下次启动游戏生效）'"
-                  @click="doSwitchIsolated(name)"
+                  :class="{ active: isolatedCurrent?.id === p.id }"
+                  :title="isolatedCurrent?.id === p.id ? '当前生效档案' : '点击切换（下次启动游戏生效）'"
+                  @click="doSwitchIsolated(p)"
                 >
-                  {{ name }}
+                  {{ p.name }}
                 </button>
               </template>
               <span v-else class="dim">暂无档案</span>

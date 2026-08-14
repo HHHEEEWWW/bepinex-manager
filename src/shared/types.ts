@@ -103,6 +103,15 @@ export interface ProfilesStore {
   games: Record<string, { currentProfileId: string | null; profiles: ProfileDef[] }>
 }
 
+/** 隔离档案信息（目录用 ASCII id，中文名存元数据） */
+export interface IsolatedProfileInfo {
+  /** ASCII 目录 id */
+  id: string
+  /** 显示名（中文） */
+  name: string
+  createdAt: string
+}
+
 /** BepInEx GitHub release 资产 */
 export interface BepInExReleaseAsset {
   name: string
