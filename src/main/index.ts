@@ -17,7 +17,7 @@ function createWindow(): void {
     minHeight: 560,
     show: false,
     autoHideMenuBar: true,
-    title: 'BepInEx Manager',
+    title: 'BepInEx 管理器',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,

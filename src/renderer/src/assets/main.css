@@ -17,6 +17,8 @@ body {
   font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
   font-size: 14px;
   user-select: none;
+  color: #e8eaee; /* 全局兜底文字颜色，防止弹窗等脱离布局容器的节点继承黑色 */
+  background: #14161a;
 }
 
 ::-webkit-scrollbar {

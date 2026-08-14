@@ -254,7 +254,7 @@ function displayName(p: PluginInfo): string {
       <div class="brand">
         <div class="brand-logo">🧩</div>
         <div class="brand-text">
-          <div class="brand-title">BepInEx Manager</div>
+          <div class="brand-title">BepInEx 管理器</div>
           <div class="brand-sub">插件目录级管理</div>
         </div>
         <button class="icon-btn" title="刷新游戏列表" @click="refreshGames">↻</button>
@@ -476,7 +476,7 @@ function displayName(p: PluginInfo): string {
             >
               <div class="release-top">
                 <span class="release-tag">{{ r.tag }}</span>
-                <span v-if="r.prerelease" class="pill pill-warn">pre-release</span>
+                <span v-if="r.prerelease" class="pill pill-warn">预览版</span>
                 <span class="release-date dim">{{ r.publishedAt }}</span>
               </div>
               <div v-if="selectedRelease?.tag === r.tag" class="asset-list">
@@ -986,6 +986,7 @@ function displayName(p: PluginInfo): string {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  color: #e8eaee; /* 弹窗内文字显式颜色（防止继承 UA 黑色） */
 }
 .cfg-dialog {
   width: min(720px, 92vw);
