@@ -9,21 +9,10 @@
  * 支持增量读取（按字节偏移），主进程维护每个游戏的偏移缓存。
  */
 import { existsSync, readFileSync, statSync } from 'fs'
-import type { BepInExInfo } from '@shared/types'
+import type { BepInExInfo, LogEntry, LogLevel, LogReadResult } from '@shared/types'
 
-export type LogLevel = 'debug' | 'info' | 'warn' | 'error' | 'fatal'
-
-export interface LogEntry {
-  level: LogLevel
-  /** 日志来源（插件名 / Unity Log / BepInEx 等） */
-  source: string
-  /** 消息内容 */
-  message: string
-  /** 是否为异常堆栈行（属于上一条错误） */
-  isStack: boolean
-  /** 日志文件中的行号（1 起） */
-  line: number
-}
+/** 日志读取结果（引用共享类型） */
+export type { LogEntry, LogLevel, LogReadResult }
 
 /** 级别正则（BepInEx 5/6 的级别名） */
 const LEVEL_MAP: Record<string, LogLevel> = {
@@ -68,20 +57,6 @@ export function parseLog(text: string): LogEntry[] {
     }
   }
   return entries
-}
-
-/** 日志读取结果 */
-export interface LogReadResult {
-  /** 日志文件是否存在 */
-  exists: boolean
-  /** 日志文件路径 */
-  path: string | null
-  /** 当前条目数 */
-  entryCount: number
-  /** 本次返回的条目（增量时仅新条目） */
-  entries: LogEntry[]
-  /** 错误级别条目按来源统计（崩溃定位） */
-  errorStats: Array<{ source: string; count: number }>
 }
 
 const EMPTY_STATS: Array<{ source: string; count: number }> = []
