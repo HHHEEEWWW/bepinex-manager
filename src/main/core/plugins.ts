@@ -43,7 +43,9 @@ export function scanPlugins(bepinex: BepInExInfo): GameScanResult {
       name: bepinex.gameDir.split(/[\\/]/).filter(Boolean).pop() ?? '',
       gameDir: bepinex.gameDir,
       source: 'manual',
-      bepinex
+      bepinex,
+      compatible: true,
+      engine: bepinex.isMono ? 'Unity (Mono)' : 'Unity (IL2CPP)'
     },
     plugins: all,
     hasDisabledDir: existsSync(disabledDir),

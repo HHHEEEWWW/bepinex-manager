@@ -16,6 +16,10 @@ export interface GameEntry {
   steamAppId?: number
   /** BepInEx 检测结果；null = 未安装 BepInEx */
   bepinex: BepInExInfo | null
+  /** 是否支持 BepInEx（Unity / .NET 引擎或已有 Doorstop 注入） */
+  compatible: boolean
+  /** 检测到的引擎描述（如 'Unity (IL2CPP)'、'Unity (Mono)'、'.NET (XNA?)'），未知为 null */
+  engine: string | null
 }
 
 /** BepInEx 安装信息 */

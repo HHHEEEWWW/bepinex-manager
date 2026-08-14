@@ -8,7 +8,7 @@
  *   4. 检查 common/<installdir>/BepInEx 是否存在
  */
 import { execFileSync } from 'child_process'
-import { existsSync, readdirSync, readFileSync } from 'fs'
+import { existsSync, readdirSync, readFileSync, openSync, readSync, closeSync } from 'fs'
 import { join } from 'path'
 import type { GameEntry } from '@shared/types'
 import { detectBepInEx } from './bepinex'
@@ -19,7 +19,7 @@ interface AcfEntry {
   installdir: string
 }
 
-/** 发现所有游戏（含 BepInEx 状态） */
+/** 发现所有游戏（含 BepInEx 状态与引擎支持性） */
 export function discoverGames(): GameEntry[] {
   const games: GameEntry[] = []
 
@@ -37,13 +37,16 @@ export function discoverGames(): GameEntry[] {
         const key = gameDir.toLowerCase()
         if (seen.has(key)) continue
         seen.add(key)
+        const bepinex = detectBepInEx(gameDir)
         games.push({
           id: hashId(gameDir),
           name: entry.name,
           gameDir,
           source: 'steam',
           steamAppId: entry.appid,
-          bepinex: detectBepInEx(gameDir)
+          bepinex,
+          compatible: bepinex !== null || isBepInExCompatible(gameDir),
+          engine: bepinex ? (bepinex.isMono ? 'Unity (Mono)' : 'Unity (IL2CPP)') : detectEngine(gameDir)
         })
       }
     }
@@ -59,7 +62,75 @@ export function addManualGame(gameDir: string): GameEntry {
     name,
     gameDir,
     source: 'manual',
-    bepinex: detectBepInEx(gameDir)
+    bepinex: detectBepInEx(gameDir),
+    compatible: true, // 用户手动指定的目录始终显示
+    engine: null
+  }
+}
+
+/**
+ * 引擎支持性检测：判断游戏是否可能支持 BepInEx。
+ * 判定顺序：Doorstop 注入件 → Unity IL2CPP → Unity Mono → .NET 可执行程序集
+ */
+export function detectEngine(gameDir: string): string | null {
+  // Doorstop 已注入
+  if (existsSync(join(gameDir, 'winhttp.dll')) && existsSync(join(gameDir, 'doorstop_config.ini'))) {
+    return 'Doorstop 已注入'
+  }
+  // Unity IL2CPP：GameAssembly.dll + global-metadata.dat
+  if (existsSync(join(gameDir, 'GameAssembly.dll')) && existsSync(join(gameDir, 'global-metadata.dat'))) {
+    return 'Unity (IL2CPP)'
+  }
+  // Unity Mono：<X>_Data/Managed/Assembly-CSharp.dll 或 UnityPlayer.dll
+  if (existsSync(join(gameDir, 'UnityPlayer.dll'))) return 'Unity (Mono)'
+  try {
+    const dataDirs = readdirSync(gameDir).filter((d) => d.endsWith('_Data'))
+    for (const d of dataDirs) {
+      if (existsSync(join(gameDir, d, 'Managed', 'Assembly-CSharp.dll'))) return 'Unity (Mono)'
+    }
+  } catch {
+    /* 目录不可读则跳过 */
+  }
+  // .NET 可执行程序集（XNA/MonoGame 或任何托管 exe）
+  try {
+    for (const f of readdirSync(gameDir)) {
+      if (f.toLowerCase().endsWith('.exe')) {
+        if (isDotNetAssembly(join(gameDir, f))) return '.NET 程序'
+      }
+    }
+  } catch {
+    /* 忽略 */
+  }
+  return null
+}
+
+/** 是否支持 BepInEx（引擎检测到 .NET 相关特征） */
+export function isBepInExCompatible(gameDir: string): boolean {
+  return detectEngine(gameDir) !== null
+}
+
+/** PE 检查：exe 是否为 .NET 托管程序集（COM Descriptor 目录非零） */
+function isDotNetAssembly(exePath: string): boolean {
+  try {
+    const fd = openSync(exePath, 'r')
+    const buf = Buffer.alloc(8192)
+    const read = readSync(fd, buf, 0, buf.length, 0)
+    closeSync(fd)
+    if (read < 0x40) return false
+    // DOS 头 MZ
+    if (buf.readUInt16LE(0) !== 0x5a4d) return false
+    const peOff = buf.readUInt32LE(0x3c)
+    if (peOff + 6 > read) return false
+    // PE 签名
+    if (buf.readUInt32LE(peOff) !== 0x00004550) return false
+    const magic = buf.readUInt16LE(peOff + 24)
+    // Optional header 内 DataDirectory 起点：PE32 = 96，PE32+ = 112
+    const ddStart = peOff + 24 + (magic === 0x20b ? 112 : 96)
+    // DataDirectory[14] = COM Descriptor（.NET 标志）
+    const comRva = buf.readUInt32LE(ddStart + 14 * 8)
+    return comRva !== 0
+  } catch {
+    return false
   }
 }
 

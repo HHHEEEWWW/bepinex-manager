@@ -78,6 +78,11 @@ onMounted(async () => {
 
 const enabledCount = computed(() => scan.value?.plugins.filter((p) => p.enabled).length ?? 0)
 
+// 侧栏分组：支持 BepInEx 的游戏 + 折叠的其他游戏
+const supportedGames = computed(() => games.value.filter((g) => g.compatible))
+const unsupportedGames = computed(() => games.value.filter((g) => !g.compatible))
+const showUnsupported = ref(false)
+
 async function refreshGames(): Promise<void> {
   try {
     const prevId = selectedGame.value?.id
@@ -405,7 +410,7 @@ function displayName(p: PluginInfo): string {
 
       <div class="game-list">
         <div
-          v-for="g in games"
+          v-for="g in supportedGames"
           :key="g.id"
           class="game-card"
           :class="{ active: selectedGame?.id === g.id }"
@@ -415,9 +420,33 @@ function displayName(p: PluginInfo): string {
           <div class="game-meta">
             <span v-if="g.bepinex" class="pill pill-ok">BepInEx {{ g.bepinex.majorVersion }}</span>
             <span v-else class="pill pill-off">无 BepInEx</span>
+            <span v-if="g.engine" class="pill pill-engine" :title="g.engine">{{ g.engine }}</span>
             <span class="game-source">{{ g.source === 'steam' ? 'Steam' : '手动' }}</span>
           </div>
         </div>
+
+        <!-- 不支持 BepInEx 的游戏（折叠） -->
+        <div v-if="unsupportedGames.length" class="unsupported-toggle" @click="showUnsupported = !showUnsupported">
+          <span class="unsupported-caret">{{ showUnsupported ? '▾' : '▸' }}</span>
+          <span>其他游戏（不支持 BepInEx）{{ unsupportedGames.length }}</span>
+        </div>
+        <template v-if="showUnsupported">
+          <div
+            v-for="g in unsupportedGames"
+            :key="g.id"
+            class="game-card unsupported"
+            :class="{ active: selectedGame?.id === g.id }"
+            @click="selectGame(g)"
+          >
+            <div class="game-name">{{ g.name }}</div>
+            <div class="game-meta">
+              <span class="pill pill-off">不支持</span>
+              <span v-if="g.engine" class="pill pill-engine" :title="g.engine">{{ g.engine }}</span>
+              <span class="game-source">{{ g.source === 'steam' ? 'Steam' : '手动' }}</span>
+            </div>
+          </div>
+        </template>
+
         <div v-if="games.length === 0" class="empty-side">未发现游戏</div>
       </div>
 
@@ -467,7 +496,7 @@ function displayName(p: PluginInfo): string {
             <button v-if="selectedGame.bepinex" class="btn-plain" title="查看 BepInEx 运行日志" @click="openLogModal">
               📋 日志
             </button>
-            <button v-if="!selectedGame.bepinex" class="btn-primary" @click="openInstallModal">
+            <button v-if="!selectedGame.bepinex && selectedGame.compatible" class="btn-primary" @click="openInstallModal">
               ⬇ 安装 BepInEx
             </button>
           </div>
@@ -476,9 +505,19 @@ function displayName(p: PluginInfo): string {
         <!-- 无 BepInEx 引导 -->
         <div v-if="!selectedGame.bepinex && !loading" class="center-box">
           <div class="center-icon">🪄</div>
-          <div class="center-title">该游戏未安装 BepInEx</div>
-          <div class="center-text dim">BepInEx 是 Unity / XNA 游戏的插件框架，安装后即可扫描管理插件。</div>
-          <button class="btn-primary big" @click="openInstallModal">⬇ 一键安装 BepInEx</button>
+          <template v-if="selectedGame.compatible">
+            <div class="center-title">该游戏未安装 BepInEx</div>
+            <div class="center-text dim">
+              BepInEx 是 Unity / XNA 游戏的插件框架，安装后即可扫描管理插件。
+            </div>
+            <button class="btn-primary big" @click="openInstallModal">⬇ 一键安装 BepInEx</button>
+          </template>
+          <template v-else>
+            <div class="center-title">该游戏不支持 BepInEx</div>
+            <div class="center-text dim">
+              未检测到 Unity / .NET 引擎特征（原生引擎游戏无法注入 BepInEx）。
+            </div>
+          </template>
         </div>
 
         <!-- 扫描中 -->
@@ -994,6 +1033,39 @@ function displayName(p: PluginInfo): string {
   color: #c084fc;
   background: rgba(192, 132, 252, 0.12);
   border: 1px solid rgba(192, 132, 252, 0.35);
+}
+.pill-engine {
+  color: #7cb3ff;
+  background: rgba(76, 154, 255, 0.08);
+  border: 1px solid rgba(76, 154, 255, 0.25);
+  font-weight: 500;
+}
+
+/* 不支持游戏折叠组 */
+.unsupported-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  margin-top: 8px;
+  border-top: 1px solid #2a2e37;
+  color: #8b93a1;
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.unsupported-toggle:hover {
+  color: #c9d1dc;
+}
+.unsupported-caret {
+  font-size: 10px;
+  width: 10px;
+}
+.game-card.unsupported {
+  opacity: 0.6;
+}
+.game-card.unsupported:hover {
+  opacity: 0.9;
 }
 
 /* ============ 内容区 ============ */
