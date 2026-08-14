@@ -65,12 +65,23 @@ export interface PluginMetadata {
   dependencies: string[]
 }
 
+/** 插件冲突 */
+export interface PluginConflict {
+  kind: 'duplicate-guid' | 'duplicate-file'
+  /** 冲突说明（中文，UI 直接展示） */
+  message: string
+  /** 涉及的插件 id 列表 */
+  pluginIds: string[]
+}
+
 /** 游戏扫描结果 */
 export interface GameScanResult {
   game: GameEntry
   plugins: PluginInfo[]
   /** 已禁用插件目录（plugins-disabled）是否存在 */
   hasDisabledDir: boolean
+  /** 插件间冲突列表 */
+  conflicts: PluginConflict[]
 }
 
 /** Profile 档案（插件启停状态快照） */

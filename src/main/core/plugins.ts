@@ -10,7 +10,7 @@
  */
 import { existsSync, mkdirSync, readdirSync, renameSync, statSync } from 'fs'
 import { join, relative, dirname } from 'path'
-import type { BepInExInfo, GameScanResult, PluginInfo } from '@shared/types'
+import type { BepInExInfo, GameScanResult, PluginConflict, PluginInfo } from '@shared/types'
 import { resolvePluginMetadata } from './metadata'
 
 export const DISABLED_DIR_NAME = 'plugins-disabled'
@@ -35,6 +35,8 @@ export function scanPlugins(bepinex: BepInExInfo): GameScanResult {
     }
   }
 
+  const conflicts = detectConflicts(all)
+
   return {
     game: {
       id: hashId(bepinex.gameDir),
@@ -44,8 +46,59 @@ export function scanPlugins(bepinex: BepInExInfo): GameScanResult {
       bepinex
     },
     plugins: all,
-    hasDisabledDir: existsSync(disabledDir)
+    hasDisabledDir: existsSync(disabledDir),
+    conflicts
   }
+}
+
+/**
+ * 冲突检测：
+ *   1. duplicate-guid —— 两个启用插件声明相同 GUID（BepInEx 只加载先到的那个，另一个失效）
+ *   2. duplicate-file —— 同名 dll 出现在多个插件目录（可能互相覆盖/干扰）
+ */
+export function detectConflicts(plugins: PluginInfo[]): PluginConflict[] {
+  const conflicts: PluginConflict[] = []
+
+  // GUID 重复（只统计启用的，禁用中的不参与加载）
+  const enabled = plugins.filter((p) => p.enabled && p.meta?.guid)
+  const byGuid = new Map<string, PluginInfo[]>()
+  for (const p of enabled) {
+    const list = byGuid.get(p.meta!.guid) ?? []
+    list.push(p)
+    byGuid.set(p.meta!.guid, list)
+  }
+  for (const [guid, list] of byGuid) {
+    if (list.length > 1) {
+      conflicts.push({
+        kind: 'duplicate-guid',
+        message: `多个插件使用相同 GUID「${guid}」，BepInEx 只会加载其中一个，其余失效：${list
+          .map((p) => p.fileName)
+          .join('、')}`,
+        pluginIds: list.map((p) => p.id)
+      })
+    }
+  }
+
+  // 同名 dll 重复（跨目录）
+  const byFileName = new Map<string, PluginInfo[]>()
+  for (const p of plugins) {
+    const key = p.fileName.toLowerCase()
+    const list = byFileName.get(key) ?? []
+    list.push(p)
+    byFileName.set(key, list)
+  }
+  for (const [name, list] of byFileName) {
+    if (list.length > 1) {
+      const ids = list.map((p) => p.id)
+      conflicts.push({
+        kind: 'duplicate-file',
+        message: `多个插件目录包含同名文件「${name}」，可能相互覆盖或干扰：${ids.join('、')}`,
+        pluginIds: ids
+      })
+    }
+  }
+
+  return conflicts
 }
 
 /** 启用/禁用插件。返回新状态。 */

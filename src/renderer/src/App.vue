@@ -4,6 +4,7 @@ import { createDiscreteApi, darkTheme } from 'naive-ui'
 import type {
   GameEntry,
   GameScanResult,
+  PluginConflict,
   PluginInfo,
   ProfileDef,
   BepInExRelease
@@ -108,6 +109,12 @@ function missingDeps(p: PluginInfo): string[] {
   if (!scan.value || !p.meta || p.meta.dependencies.length === 0) return []
   const known = new Set(scan.value.plugins.filter((x) => x.meta?.guid).map((x) => x.meta!.guid))
   return p.meta.dependencies.filter((d) => !known.has(d))
+}
+
+/** 该插件涉及的冲突 */
+function conflictsFor(p: PluginInfo): PluginConflict[] {
+  if (!scan.value) return []
+  return scan.value.conflicts.filter((c) => c.pluginIds.includes(p.id))
 }
 
 // ---- Profile 操作 ----
@@ -381,6 +388,14 @@ function displayName(p: PluginInfo): string {
                   <span v-if="p.meta" class="ver-tag">{{ p.meta.version }}</span>
                   <span v-if="!p.enabled" class="pill pill-off">已禁用</span>
                   <span v-if="p.metaError" class="pill pill-warn" :title="p.metaError">元数据读取失败</span>
+                  <span
+                    v-for="c in conflictsFor(p)"
+                    :key="c.kind + c.pluginIds.join()"
+                    class="pill pill-conflict"
+                    :title="c.message"
+                  >
+                    {{ c.kind === 'duplicate-guid' ? 'GUID 冲突' : '文件冲突' }}
+                  </span>
                 </div>
                 <div class="plugin-guid mono dim">
                   {{ p.meta ? p.meta.guid : p.fileName }}
@@ -653,6 +668,11 @@ function displayName(p: PluginInfo): string {
   color: #fbbf24;
   background: rgba(251, 191, 36, 0.1);
   border: 1px solid rgba(251, 191, 36, 0.3);
+}
+.pill-conflict {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.35);
 }
 
 /* ============ 内容区 ============ */
