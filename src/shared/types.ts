@@ -62,6 +62,8 @@ export interface PluginInfo {
   configFile: string | null
   /** 元数据解析失败的错误信息 */
   metaError: string | null
+  /** Mod 说明（内置或用户自定义，可为 null） */
+  note: string | null
 }
 
 /** 从 dll 程序集特性解析出的插件元数据 */

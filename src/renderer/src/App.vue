@@ -633,6 +633,9 @@ function displayName(p: PluginInfo): string {
                   {{ p.meta ? p.meta.guid : p.fileName }}
                   <span class="sep">·</span> {{ fmtSize(p.sizeBytes) }}
                 </div>
+                <div v-if="p.note" class="plugin-note" :title="p.note">
+                  {{ p.note.split('\n')[0] }}
+                </div>
                 <div v-if="missingDeps(p).length" class="dep-warn">
                   ⚠ 缺少依赖：{{ missingDeps(p).join(', ') }}
                 </div>
@@ -1273,6 +1276,16 @@ function displayName(p: PluginInfo): string {
   font-size: 11.5px;
   margin-top: 4px;
   user-select: text;
+}
+.plugin-note {
+  font-size: 12px;
+  margin-top: 4px;
+  color: #9fb3c8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 640px;
+  cursor: help;
 }
 .sep {
   margin: 0 4px;

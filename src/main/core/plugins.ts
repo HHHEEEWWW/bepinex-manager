@@ -12,6 +12,7 @@ import { existsSync, mkdirSync, readdirSync, renameSync, statSync } from 'fs'
 import { join, relative, dirname } from 'path'
 import type { BepInExInfo, GameScanResult, PluginConflict, PluginInfo } from '@shared/types'
 import { resolvePluginMetadata } from './metadata'
+import { getModNote } from './modnotes'
 
 export const DISABLED_DIR_NAME = 'plugins-disabled'
 
@@ -27,11 +28,12 @@ export function scanPlugins(bepinex: BepInExInfo): GameScanResult {
   // 解析元数据（批量一次调用，dll 多时也能接受）
   resolvePluginMetadata(all, bepinex)
 
-  // 关联 cfg（文件名 = GUID.cfg）
+  // 关联 cfg（文件名 = GUID.cfg）+ mod 说明
   for (const p of all) {
     if (p.meta?.guid) {
       const cfg = join(bepinex.configDir, `${p.meta.guid}.cfg`)
       p.configFile = existsSync(cfg) ? cfg : null
+      p.note = getModNote(p.meta.guid)
     }
   }
 
@@ -146,6 +148,7 @@ function collectDlls(rootDir: string, baseDir: string, enabled: boolean): Plugin
           enabled,
           meta: null,
           configFile: null,
+          note: null,
           metaError: null
         })
       }
