@@ -79,11 +79,11 @@ function resolveDataRoot(): string {
 
 // 数据根必须在 app ready 之前确定并注入：
 // 1. core 层（profiles.ts / isolation.ts / installer.ts）读取 BEPINEX_MANAGER_DATA_DIR
-// 2. userData 一并指向 <dataRoot>/cache —— Chromium 缓存（Cache/GPUCache 等）也进安装目录，
-//    打包版做到"零 C 盘写入"（开发模式 dataRoot=userData，cache 在其下也无副作用）
+// 2. userData 指向 <dataRoot>/.userdata —— Chromium 缓存（Cache/GPUCache 等）也进安装目录，
+//    打包版做到"零 C 盘写入"；注意与 installer 下载缓存（dataRoot/cache）分开，互不污染
 const dataRoot = resolveDataRoot()
 process.env.BEPINEX_MANAGER_DATA_DIR = dataRoot
-app.setPath('userData', join(dataRoot, 'cache'))
+app.setPath('userData', join(dataRoot, '.userdata'))
 
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.bepinexmanager.app')
