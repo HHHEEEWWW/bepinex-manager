@@ -4,3 +4,8 @@ out/
 *.log
 .DS_Store
 .vite/
+tools/plugin-metadata-reader/bin/
+tools/plugin-metadata-reader/obj/
+
+scripts/*.cjs
+

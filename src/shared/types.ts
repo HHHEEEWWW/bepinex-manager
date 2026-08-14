@@ -159,6 +159,23 @@ export interface LogReadResult {
   errorStats: Array<{ source: string; count: number }>
 }
 
+/** 拖拽安装 MOD 的单项结果 */
+export interface ModInstallItem {
+  /** 来源文件名（dll 或 zip 内的条目名） */
+  fileName: string
+  /** 是否成功 */
+  ok: boolean
+  /** 结果描述（成功路径 / 忽略原因 / 失败原因） */
+  message: string
+}
+
+/** 拖拽安装 MOD 结果汇总 */
+export interface ModInstallResult {
+  installed: ModInstallItem[]
+  ignored: ModInstallItem[]
+  failed: ModInstallItem[]
+}
+
 /** IPC 通道常量（主进程 ipcMain.handle 与 preload 共用） */
 export const IPC = {
   /** 发现游戏列表 */
@@ -196,5 +213,7 @@ export const IPC = {
   /** 删除隔离档案（当前生效档案受保护） */
   isolationRemove: 'isolation:remove',
   /** 在文件管理器中打开插件库目录 */
-  pluginsRootOpen: 'plugins-root:open'
+  pluginsRootOpen: 'plugins-root:open',
+  /** 拖拽安装 MOD（dll / zip 直接装入当前档案 plugins） */
+  installMods: 'mods:install'
 } as const

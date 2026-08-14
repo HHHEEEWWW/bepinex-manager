@@ -1,7 +1,7 @@
 {
   "name": "bepinex-manager",
   "version": "0.1.0",
-  "description": "跨游戏通用的 BepInEx 插件管理器（扫描 plugins 目录、解析插件元数据、启停、配置编辑、Profile 切换）",
+  "description": "跨游戏通用的 BepInEx 插件管理器（隔离模式：插件库 + 档案，安装/启停/配置/日志一键管理）",
   "main": "./out/main/index.js",
   "author": "bepinex-manager",
   "license": "MIT",
@@ -10,7 +10,8 @@
     "dev": "electron-vite dev",
     "start": "electron-vite preview",
     "build": "electron-vite build",
-    "build:dist": "electron-vite build && electron-builder --win",
+    "release:tool": "dotnet publish tools/plugin-metadata-reader -c Release -r win-x64 --self-contained true",
+    "build:dist": "pnpm build && pnpm release:tool && electron-builder --win",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
@@ -19,11 +20,13 @@
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.1",
     "@electron-toolkit/utils": "^4.0.0",
+    "adm-zip": "^0.5.16",
     "naive-ui": "^2.44.1",
     "vue": "^3.5.13"
   },
   "devDependencies": {
     "@electron-toolkit/tsconfig": "^1.0.1",
+    "@types/adm-zip": "^0.5.5",
     "@types/node": "^22.10.0",
     "@vitejs/plugin-vue": "^5.2.1",
     "electron": "^37.2.0",

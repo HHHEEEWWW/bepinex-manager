@@ -6,6 +6,7 @@ import { IPC } from '@shared/types'
 import { discoverGames, addManualGame } from './core/games'
 import { detectBepInEx } from './core/bepinex'
 import { scanPlugins, setPluginEnabled } from './core/plugins'
+import { installModsToGame } from './core/modinstall'
 import { listBepInExReleases, installBepInExToLibrary } from './core/installer'
 import { readLog, LogReadResult } from './core/logparser'
 import {
@@ -202,6 +203,11 @@ function registerIpcHandlers(): void {  // 发现游戏（Steam 库 + 手动）
     const err = await shell.openPath(dir)
     return err === '' ? true : Promise.reject(new Error(err))
   })
+
+  // 拖拽安装 MOD（.dll / .zip → 当前档案 plugins）
+  ipcMain.handle(IPC.installMods, (_e, gameDir: string, filePaths: string[]) =>
+    installModsToGame(gameDir, filePaths)
+  )
 
   // ---- BepInEx 安装 ----
   ipcMain.handle(IPC.bepinexListReleases, (_e, runtime: 'mono' | 'il2cpp') =>

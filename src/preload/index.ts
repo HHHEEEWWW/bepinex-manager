@@ -1,10 +1,11 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type {
   GameEntry,
   GameScanResult,
   BepInExRelease,
   LogReadResult,
-  IsolatedProfileInfo
+  IsolatedProfileInfo,
+  ModInstallResult
 } from '../shared/types'
 import { IPC } from '../shared/types'
 
@@ -45,6 +46,13 @@ const api = {
     ipcRenderer.invoke(IPC.isolationRemove, gameDir, gameName, profileId),
   /** 在文件管理器中打开目录 */
   openPath: (dir: string): Promise<boolean> => ipcRenderer.invoke(IPC.pluginsRootOpen, dir),
+
+  // ---- MOD 拖拽安装 ----
+  /** 拖拽安装 MOD（.dll / .zip）到当前档案 plugins 目录 */
+  installMods: (gameDir: string, filePaths: string[]): Promise<ModInstallResult> =>
+    ipcRenderer.invoke(IPC.installMods, gameDir, filePaths),
+  /** 从拖拽的 File 对象取真实磁盘路径（Electron 37：File.path 已移除，必须用 webUtils） */
+  getPathForFile: (file: File): string => webUtils.getPathForFile(file),
 
   // ---- BepInEx 安装 ----
   listBepInExReleases: (runtime: 'mono' | 'il2cpp'): Promise<BepInExRelease[]> =>

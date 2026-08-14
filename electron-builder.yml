@@ -12,14 +12,11 @@ directories:
 files:
   - out/**
 
-# 元数据解析工具（.NET）打进安装目录 tools/plugin-metadata-reader/
+# 元数据解析工具（.NET 自包含发布，零运行时依赖）打进安装目录 tools/plugin-metadata-reader/
+# 自包含产物来自 `pnpm release:tool`（dotnet publish -r win-x64 --self-contained）
 extraResources:
-  - from: tools/plugin-metadata-reader/bin/Release/net9.0/
+  - from: tools/plugin-metadata-reader/bin/Release/net9.0/win-x64/publish/
     to: tools/plugin-metadata-reader
-    filter:
-      - "*.exe"
-      - "*.dll"
-      - "*.json"
 
 win:
   target:

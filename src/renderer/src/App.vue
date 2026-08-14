@@ -9,7 +9,8 @@ import type {
   PluginInfo,
   BepInExRelease,
   LogReadResult,
-  IsolatedProfileInfo
+  IsolatedProfileInfo,
+  ModInstallResult
 } from '@shared/types'
 
 const { message } = createDiscreteApi(['message'], {
@@ -55,6 +56,50 @@ const isolateModal = ref<{
   busy: boolean
   error: string
 } | null>(null)
+
+// ---- MOD 拖拽安装 ----
+const dragOver = ref(false)
+const modBusy = ref(false)
+const modResult = ref<ModInstallResult | null>(null)
+
+/** 拖拽安装 MOD：.dll 直接装入，.zip 自动解压提取插件（装到当前档案） */
+async function onDropMods(e: DragEvent): Promise<void> {
+  dragOver.value = false
+  if (!selectedGame.value) return
+  const files = Array.from(e.dataTransfer?.files ?? [])
+  if (!files.length) return
+  const paths: string[] = []
+  for (const f of files) {
+    try {
+      const p = window.api.getPathForFile(f)
+      if (p) paths.push(p)
+    } catch {
+      /* 取不到路径的文件跳过 */
+    }
+  }
+  if (!paths.length) {
+    message.warning('无法读取拖入文件的路径')
+    return
+  }
+  modBusy.value = true
+  try {
+    const res = await window.api.installMods(selectedGame.value.gameDir, paths)
+    modResult.value = res
+    const ok = res.installed.length
+    const bad = res.failed.length
+    if (ok && !bad) message.success(`已安装 ${ok} 个插件${res.ignored.length ? `，忽略 ${res.ignored.length} 个非插件文件` : ''}`)
+    else if (ok && bad) message.warning(`已安装 ${ok} 个，失败 ${bad} 个（点击结果查看详情）`)
+    else if (bad) message.error(`安装失败 ${bad} 个（点击结果查看详情）`)
+    else message.info('没有可安装的插件（点击结果查看详情）')
+    if (ok) {
+      scan.value = await window.api.scanGame(selectedGame.value.gameDir)
+    }
+  } catch (err) {
+    message.error(`安装失败：${(err as Error).message}`)
+  } finally {
+    modBusy.value = false
+  }
+}
 
 const filteredLogs = computed(() => {
   if (!logData.value) return []
@@ -554,6 +599,22 @@ function displayName(p: PluginInfo): string {
             <span class="stat-dot off"></span>禁用 {{ scan.plugins.length - enabledCount }}
           </div>
 
+          <!-- MOD 拖拽安装 -->
+          <div
+            class="drop-zone"
+            :class="{ over: dragOver, busy: modBusy }"
+            @dragover.prevent="dragOver = true"
+            @dragleave.prevent="dragOver = false"
+            @drop.prevent="onDropMods"
+          >
+            <div class="drop-icon">{{ modBusy ? '⏳' : '📥' }}</div>
+            <div class="drop-text">
+              <b>{{ modBusy ? '正在安装…' : '拖拽 MOD 到这里安装' }}</b>
+              <span class="dim">支持 .dll 文件或 .zip 压缩包（自动解压提取插件），安装到当前档案，重名自动覆盖更新</span>
+            </div>
+            <button class="btn-plain drop-help" @click="openPluginsRoot">或打开插件目录手动放置</button>
+          </div>
+
           <!-- 插件列表 -->
           <div class="plugin-list">
             <div
@@ -741,6 +802,46 @@ function displayName(p: PluginInfo): string {
         >
           {{ isolateModal.busy ? '处理中…' : isolateModal.mode === 'create' ? '创建档案' : '开始迁移' }}
         </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ MOD 安装结果弹窗 ============ -->
+  <div v-if="modResult" class="mask" @click.self="modResult = null">
+    <div class="dialog mod-result-dialog">
+      <div class="dialog-head">
+        <span>📦 MOD 安装结果</span>
+        <button class="icon-btn" @click="modResult = null">✕</button>
+      </div>
+      <div class="mod-result-body">
+        <div v-if="modResult.installed.length" class="mod-result-group ok">
+          <div class="mod-result-title">✅ 已安装 {{ modResult.installed.length }} 个插件</div>
+          <div v-for="(it, i) in modResult.installed" :key="'i' + i" class="mod-result-row">
+            <span class="mono">{{ it.fileName }}</span>
+            <span class="dim">→ {{ it.message }}</span>
+          </div>
+        </div>
+        <div v-if="modResult.ignored.length" class="mod-result-group warn">
+          <div class="mod-result-title">⏭ 已跳过 {{ modResult.ignored.length }} 项</div>
+          <div v-for="(it, i) in modResult.ignored" :key="'g' + i" class="mod-result-row">
+            <span class="mono">{{ it.fileName }}</span>
+            <span class="dim">· {{ it.message }}</span>
+          </div>
+        </div>
+        <div v-if="modResult.failed.length" class="mod-result-group bad">
+          <div class="mod-result-title">❌ 失败 {{ modResult.failed.length }} 项</div>
+          <div v-for="(it, i) in modResult.failed" :key="'f' + i" class="mod-result-row">
+            <span class="mono">{{ it.fileName }}</span>
+            <span class="dim">· {{ it.message }}</span>
+          </div>
+        </div>
+        <div v-if="!modResult.installed.length && !modResult.ignored.length && !modResult.failed.length" class="dim">
+          未处理任何文件
+        </div>
+      </div>
+      <div class="dialog-foot">
+        <span class="dim">装完即可从 Steam 启动游戏生效</span>
+        <button class="btn-primary" @click="modResult = null">好的</button>
       </div>
     </div>
   </div>
@@ -1177,6 +1278,93 @@ function displayName(p: PluginInfo): string {
 }
 .stat-dot.off {
   background: #6b7280;
+}
+
+/* MOD 拖拽安装区 */
+.drop-zone {
+  margin: 0 22px 10px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  border: 2px dashed #3a4250;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  transition: border-color 0.15s ease, background 0.15s ease;
+  cursor: pointer;
+}
+.drop-zone:hover {
+  border-color: #4c9aff;
+  background: rgba(76, 154, 255, 0.06);
+}
+.drop-zone.over {
+  border-color: #4c9aff;
+  background: rgba(76, 154, 255, 0.14);
+}
+.drop-zone.busy {
+  opacity: 0.6;
+  cursor: wait;
+}
+.drop-icon {
+  font-size: 26px;
+  flex-shrink: 0;
+}
+.drop-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 13px;
+}
+.drop-help {
+  flex-shrink: 0;
+}
+
+/* MOD 安装结果弹窗 */
+.mod-result-dialog {
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+}
+.mod-result-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 18px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.mod-result-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid;
+}
+.mod-result-group.ok {
+  border-color: rgba(63, 185, 80, 0.35);
+  background: rgba(63, 185, 80, 0.07);
+}
+.mod-result-group.warn {
+  border-color: rgba(255, 193, 7, 0.35);
+  background: rgba(255, 193, 7, 0.06);
+}
+.mod-result-group.bad {
+  border-color: rgba(224, 49, 49, 0.4);
+  background: rgba(224, 49, 49, 0.08);
+}
+.mod-result-title {
+  font-weight: 700;
+  font-size: 13px;
+}
+.mod-result-row {
+  font-size: 12px;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  word-break: break-all;
 }
 
 /* 插件卡片 */
