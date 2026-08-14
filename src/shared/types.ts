@@ -94,21 +94,6 @@ export interface GameScanResult {
   conflicts: PluginConflict[]
 }
 
-/** Profile 档案（插件启停状态快照） */
-export interface ProfileDef {
-  id: string
-  name: string
-  createdAt: string
-  /** 插件相对路径 -> 是否启用（快照） */
-  pluginStates: Record<string, boolean>
-}
-
-/** Profile 持久化存储结构 */
-export interface ProfilesStore {
-  /** 按游戏目录（小写规范化）分组的档案 */
-  games: Record<string, { currentProfileId: string | null; profiles: ProfileDef[] }>
-}
-
 /** 隔离档案信息（目录用 ASCII id，中文名存元数据） */
 export interface IsolatedProfileInfo {
   /** ASCII 目录 id */
@@ -188,16 +173,6 @@ export const IPC = {
   readConfigFile: 'config:read',
   /** 写入插件配置文件（cfg） */
   writeConfigFile: 'config:write',
-  /** 列出某游戏的档案 */
-  profilesList: 'profiles:list',
-  /** 创建档案（快照当前状态） */
-  profilesCreate: 'profiles:create',
-  /** 删除档案 */
-  profilesDelete: 'profiles:delete',
-  /** 重命名档案 */
-  profilesRename: 'profiles:rename',
-  /** 应用档案 */
-  profilesApply: 'profiles:apply',
   /** 列出 BepInEx 可用版本 */
   bepinexListReleases: 'bepinex:list-releases',
   /** 安装 BepInEx */

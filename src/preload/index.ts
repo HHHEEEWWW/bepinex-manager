@@ -2,7 +2,6 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type {
   GameEntry,
   GameScanResult,
-  ProfileDef,
   BepInExRelease,
   LogReadResult,
   IsolatedProfileInfo
@@ -24,18 +23,6 @@ const api = {
   /** 写入插件 cfg */
   writeConfigFile: (cfgPath: string, content: string): Promise<boolean> =>
     ipcRenderer.invoke(IPC.writeConfigFile, cfgPath, content),
-
-  // ---- Profile 档案 ----
-  listProfiles: (gameDir: string): Promise<ProfileDef[]> =>
-    ipcRenderer.invoke(IPC.profilesList, gameDir),
-  createProfile: (gameDir: string, name: string, states: Record<string, boolean>): Promise<ProfileDef> =>
-    ipcRenderer.invoke(IPC.profilesCreate, gameDir, name, states),
-  deleteProfile: (gameDir: string, profileId: string): Promise<boolean> =>
-    ipcRenderer.invoke(IPC.profilesDelete, gameDir, profileId),
-  renameProfile: (gameDir: string, profileId: string, name: string): Promise<ProfileDef | null> =>
-    ipcRenderer.invoke(IPC.profilesRename, gameDir, profileId, name),
-  applyProfile: (gameDir: string, profileId: string): Promise<{ applied: number; rolledBack: number; changes: string[] }> =>
-    ipcRenderer.invoke(IPC.profilesApply, gameDir, profileId),
 
   // ---- 日志 ----
   readLog: (gameDir: string): Promise<LogReadResult> => ipcRenderer.invoke(IPC.logsRead, gameDir),

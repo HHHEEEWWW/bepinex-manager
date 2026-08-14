@@ -6,7 +6,6 @@ import { IPC } from '@shared/types'
 import { discoverGames, addManualGame } from './core/games'
 import { detectBepInEx } from './core/bepinex'
 import { scanPlugins, setPluginEnabled } from './core/plugins'
-import { listProfiles, createProfile, deleteProfile, renameProfile, applyProfile } from './core/profiles'
 import { listBepInExReleases, installBepInExToLibrary } from './core/installer'
 import { readLog, LogReadResult } from './core/logparser'
 import {
@@ -137,30 +136,6 @@ function registerIpcHandlers(): void {  // 发现游戏（Steam 库 + 手动）
   ipcMain.handle(IPC.writeConfigFile, (_e, cfgPath: string, content: string) => {
     writeFileSync(cfgPath, content, 'utf8')
     return true
-  })
-
-  // ---- Profile 档案 ----
-  ipcMain.handle(IPC.profilesList, (_e, gameDir: string) => listProfiles(gameDir))
-
-  ipcMain.handle(
-    IPC.profilesCreate,
-    (_e, gameDir: string, name: string, states: Record<string, boolean>) =>
-      createProfile(gameDir, name, states)
-  )
-
-  ipcMain.handle(IPC.profilesDelete, (_e, gameDir: string, profileId: string) => {
-    deleteProfile(gameDir, profileId)
-    return true
-  })
-
-  ipcMain.handle(IPC.profilesRename, (_e, gameDir: string, profileId: string, name: string) =>
-    renameProfile(gameDir, profileId, name)
-  )
-
-  ipcMain.handle(IPC.profilesApply, (_e, gameDir: string, profileId: string) => {
-    const bepinex = detectBepInEx(gameDir)
-    if (!bepinex) throw new Error(`未在 ${gameDir} 检测到 BepInEx 安装`)
-    return applyProfile(bepinex, profileId)
   })
 
   // ---- 日志 ----

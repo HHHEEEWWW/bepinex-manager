@@ -7,7 +7,6 @@ import type {
   GameScanResult,
   PluginConflict,
   PluginInfo,
-  ProfileDef,
   BepInExRelease,
   LogReadResult,
   IsolatedProfileInfo
@@ -21,11 +20,6 @@ const games = ref<GameEntry[]>([])
 const selectedGame = ref<GameEntry | null>(null)
 const scan = ref<GameScanResult | null>(null)
 const loading = ref(false)
-
-// ---- Profile 档案 ----
-const profiles = ref<ProfileDef[]>([])
-const profileNameInput = ref('')
-const applyingProfile = ref(false)
 
 // ---- BepInEx 安装 ----
 const showInstallModal = ref(false)
@@ -115,7 +109,6 @@ async function addManualGame(): Promise<void> {
 async function selectGame(g: GameEntry): Promise<void> {
   selectedGame.value = g
   scan.value = null
-  profiles.value = []
   isolatedList.value = []
   isolatedCurrent.value = null
   loading.value = true
@@ -124,13 +117,15 @@ async function selectGame(g: GameEntry): Promise<void> {
     loading.value = false
     return
   }
+  // 常规安装（BepInEx 在游戏目录）：只显示迁入插件库引导，不做常规模式管理
+  if (!g.bepinex.isIsolated) {
+    loading.value = false
+    return
+  }
   try {
     scan.value = await window.api.scanGame(g.gameDir)
-    profiles.value = await window.api.listProfiles(g.gameDir)
-    if (g.bepinex.isIsolated) {
-      isolatedList.value = await window.api.isolationList(g.gameDir, g.name)
-      isolatedCurrent.value = await window.api.isolationCurrent(g.gameDir, g.name)
-    }
+    isolatedList.value = await window.api.isolationList(g.gameDir, g.name)
+    isolatedCurrent.value = await window.api.isolationCurrent(g.gameDir, g.name)
   } catch (e) {
     message.error(String(e))
   } finally {
@@ -220,53 +215,6 @@ function missingDeps(p: PluginInfo): string[] {
 function conflictsFor(p: PluginInfo): PluginConflict[] {
   if (!scan.value) return []
   return scan.value.conflicts.filter((c) => c.pluginIds.includes(p.id))
-}
-
-// ---- Profile 操作 ----
-async function saveCurrentAsProfile(): Promise<void> {
-  if (!selectedGame.value || !scan.value) return
-  const name = profileNameInput.value.trim()
-  if (!name) {
-    message.warning('请输入档案名称')
-    return
-  }
-  const states: Record<string, boolean> = {}
-  for (const p of scan.value.plugins) states[p.id] = p.enabled
-  try {
-    const created = await window.api.createProfile(selectedGame.value.gameDir, name, states)
-    profiles.value.push(created)
-    profileNameInput.value = ''
-    message.success(`已保存档案「${created.name}」`)
-  } catch (e) {
-    message.error(`保存失败: ${e}`)
-  }
-}
-
-async function applyProfileState(p: ProfileDef): Promise<void> {
-  if (!selectedGame.value) return
-  applyingProfile.value = true
-  try {
-    const result = await window.api.applyProfile(selectedGame.value.gameDir, p.id)
-    if (result.rolledBack > 0) {
-      message.warning(`应用「${p.name}」：${result.applied} 项变更，回滚 ${result.rolledBack} 项`)
-    } else {
-      message.success(`已应用「${p.name}」：${result.applied} 项变更`)
-    }
-    if (selectedGame.value) {
-      scan.value = await window.api.scanGame(selectedGame.value.gameDir)
-    }
-  } catch (e) {
-    message.error(`应用失败: ${e}`)
-  } finally {
-    applyingProfile.value = false
-  }
-}
-
-async function removeProfile(p: ProfileDef): Promise<void> {
-  if (!selectedGame.value) return
-  await window.api.deleteProfile(selectedGame.value.gameDir, p.id)
-  profiles.value = profiles.value.filter((x) => x.id !== p.id)
-  message.info(`已删除「${p.name}」`)
 }
 
 // ---- 配置编辑 ----
@@ -510,10 +458,10 @@ function displayName(p: PluginInfo): string {
             <button
               v-if="selectedGame.bepinex && !selectedGame.bepinex.isIsolated"
               class="btn-plain"
-              title="把 BepInEx 迁入插件库目录，支持多档案独立配置与插件组合"
+              title="把 BepInEx 迁入插件库目录（管理器只提供隔离模式）"
               @click="isolateModal = { show: true, mode: 'migrate', name: '', busy: false, error: '' }"
             >
-              📦 启用档案隔离
+              📦 迁入插件库
             </button>
             <button v-if="selectedGame.bepinex" class="btn-plain" title="查看 BepInEx 运行日志" @click="openLogModal">
               📋 日志
@@ -542,80 +490,61 @@ function displayName(p: PluginInfo): string {
           </template>
         </div>
 
+        <!-- 常规安装（BepInEx 在游戏目录）：迁入插件库引导 -->
+        <div v-else-if="selectedGame.bepinex && !selectedGame.bepinex.isIsolated" class="center-box">
+          <div class="center-icon">📦</div>
+          <div class="center-title">该游戏为常规安装（BepInEx 在游戏目录）</div>
+          <div class="center-text dim">
+            管理器只提供隔离模式（插件库）。一键迁入后即可在此管理插件、配置与档案。
+          </div>
+          <button
+            class="btn-primary big"
+            @click="isolateModal = { show: true, mode: 'migrate', name: '', busy: false, error: '' }"
+          >
+            📦 迁入插件库
+          </button>
+        </div>
+
         <!-- 扫描中 -->
         <div v-else-if="loading" class="center-box">
           <div class="loading-ring"></div>
           <div class="center-text dim">正在扫描插件…</div>
         </div>
 
-        <!-- 插件管理 -->
+        <!-- 插件管理（仅隔离模式） -->
         <template v-else-if="scan">
           <!-- 档案栏 -->
           <div class="profile-bar">
-            <template v-if="selectedGame.bepinex?.isIsolated">
-              <span class="bar-label">🔒 档案</span>
-              <template v-if="isolatedList.length">
-                <template v-for="p in isolatedList" :key="p.id">
-                  <button
-                    class="profile-chip"
-                    :class="{ active: isolatedCurrent?.id === p.id }"
-                    :title="isolatedCurrent?.id === p.id ? '当前生效档案' : '点击切换（下次启动游戏生效）'"
-                    @click="doSwitchIsolated(p)"
-                  >
-                    {{ p.name }}
-                  </button>
-                  <button
-                    class="profile-del"
-                    :disabled="isolatedCurrent?.id === p.id"
-                    :title="isolatedCurrent?.id === p.id ? '当前生效档案不可删除（先切换或还原）' : '删除档案'"
-                    @click="doRemoveIsolated(p)"
-                  >
-                    ✕
-                  </button>
-                </template>
+            <span class="bar-label">🔒 档案</span>
+            <template v-if="isolatedList.length">
+              <template v-for="p in isolatedList" :key="p.id">
+                <button
+                  class="profile-chip"
+                  :class="{ active: isolatedCurrent?.id === p.id }"
+                  :title="isolatedCurrent?.id === p.id ? '当前生效档案' : '点击切换（下次启动游戏生效）'"
+                  @click="doSwitchIsolated(p)"
+                >
+                  {{ p.name }}
+                </button>
+                <button
+                  class="profile-del"
+                  :disabled="isolatedCurrent?.id === p.id"
+                  :title="isolatedCurrent?.id === p.id ? '当前生效档案不可删除（先切换）' : '删除档案'"
+                  @click="doRemoveIsolated(p)"
+                >
+                  ✕
+                </button>
               </template>
-              <span v-else class="dim">暂无档案</span>
-              <button
-                class="btn-plain iso-new-btn"
-                title="新建档案：从当前档案复制 BepInEx 框架（插件/配置为空），创建后自动切换"
-                @click="isolateModal = { show: true, mode: 'create', name: '', busy: false, error: '' }"
-              >
-                ＋ 新建档案
-              </button>
-              <span class="dim iso-tip">隔离模式下每个档案拥有独立的插件与配置</span>
-            </template>
-            <template v-else>
-            <span class="bar-label">📁 档案</span>
-            <template v-if="profiles.length">
-              <button
-                v-for="p in profiles"
-                :key="p.id"
-                class="profile-chip"
-                :disabled="applyingProfile"
-                :title="`应用「${p.name}」（${Object.keys(p.pluginStates).length} 个插件状态）`"
-                @click="applyProfileState(p)"
-              >
-                {{ p.name }}
-              </button>
-              <button
-                v-for="p in profiles"
-                :key="'x' + p.id"
-                class="profile-del"
-                title="删除档案"
-                @click="removeProfile(p)"
-              >
-                ✕
-              </button>
             </template>
             <span v-else class="dim">暂无档案</span>
-            <input
-              v-model="profileNameInput"
-              class="profile-input"
-              placeholder="新档案名称…"
-              @keyup.enter="saveCurrentAsProfile"
-            />
-            <button class="btn-plain" @click="saveCurrentAsProfile">保存当前状态</button>
-            </template>
+            <button
+              class="btn-plain iso-new-btn"
+              title="新建档案：从当前档案复制 BepInEx 框架（插件/配置为空），创建后自动切换"
+              @click="isolateModal = { show: true, mode: 'create', name: '', busy: false, error: '' }"
+            >
+              ＋ 新建档案
+            </button>
+            <span class="dim iso-tip">隔离模式下每个档案拥有独立的插件与配置</span>
           </div>
 
           <!-- 插件统计 -->
