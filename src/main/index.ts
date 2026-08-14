@@ -15,7 +15,8 @@ import {
   switchIsolatedProfile,
   restoreFromIsolated,
   listIsolatedProfiles,
-  currentIsolatedProfile
+  currentIsolatedProfile,
+  removeIsolatedProfile
 } from './core/isolation'
 
 /** 每个游戏的日志读取偏移缓存（gameDir -> 字节偏移） */
@@ -218,6 +219,11 @@ function registerIpcHandlers(): void {  // 发现游戏（Steam 库 + 手动）
   ipcMain.handle(IPC.isolationCurrent, (_e, gameDir: string, gameName: string) =>
     currentIsolatedProfile(gameDir, gameName)
   )
+
+  ipcMain.handle(IPC.isolationRemove, (_e, gameDir: string, gameName: string, profileId: string) => {
+    removeIsolatedProfile(gameDir, gameName, profileId)
+    return true
+  })
 
   // 在系统文件管理器中打开插件库目录
   ipcMain.handle(IPC.pluginsRootOpen, async (_e, dir: string) => {

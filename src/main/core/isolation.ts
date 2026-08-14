@@ -84,9 +84,42 @@ export function gamePluginsRootDir(gameName: string, gameDir: string): string {
   return join(pluginsRootDir(), `${slug}-${hashId(gameDir).slice(0, 4)}`)
 }
 
+/**
+ * 从 doorstop target 反推插件库内的游戏根目录。
+ * target 形如 <plugin-library>/<gameRoot>/<profileId>/BepInEx/core/<preloader>.dll。
+ * 不依赖 gameName/gameDir 的 hash 派生——路径大小写/尾部斜杠/名称漂移时依然正确。
+ */
+export function gameRootFromTarget(target: string): string | null {
+  const libRoot = pluginsRootDir()
+  const idx = target.toLowerCase().indexOf(libRoot.toLowerCase())
+  if (idx < 0) return null
+  const rest = target.slice(idx + libRoot.length).split(/[\\/]/).filter(Boolean)
+  if (rest.length < 2) return null
+  const gameRoot = join(libRoot, rest[0])
+  return existsSync(gameRoot) ? gameRoot : null
+}
+
+/**
+ * 某游戏在插件库中的根目录：优先从 doorstop target 反推（迁移/切换后
+ * gameName/gameDir 字符串漂移——大小写、尾部斜杠、手动添加 vs Steam 扫描——
+ * 都会让 hash 派生失配，导致"当前不在隔离模式"误报），失败才回退派生。
+ */
+function resolveGamePluginsRoot(gameDir: string, gameName: string): string {
+  try {
+    const target = readDoorstopTarget(join(gameDir, 'doorstop_config.ini'))
+    if (target) {
+      const derived = gameRootFromTarget(target)
+      if (derived) return derived
+    }
+  } catch {
+    /* 回退派生路径 */
+  }
+  return gamePluginsRootDir(gameName, gameDir)
+}
+
 /** 某档案的目录 */
 export function profileDir(gameName: string, gameDir: string, profileId: string): string {
-  return join(gamePluginsRootDir(gameName, gameDir), profileId)
+  return join(resolveGamePluginsRoot(gameDir, gameName), profileId)
 }
 
 /** 档案元数据文件路径 */
@@ -320,15 +353,19 @@ export function restoreFromIsolated(gameDir: string, gameName: string, profileId
   }
 }
 
-/** 删除隔离档案目录 */
+/** 删除隔离档案目录（保护：当前生效档案不可删除） */
 export function removeIsolatedProfile(gameDir: string, gameName: string, profileId: string): void {
+  const cur = currentIsolatedProfile(gameDir, gameName)
+  if (cur && cur.id === profileId) {
+    throw new Error(`「${cur.name}」是当前生效档案（doorstop 正指向它），请先切换档案或还原到游戏目录后再删除`)
+  }
   const dir = profileDir(gameName, gameDir, profileId)
   if (existsSync(dir)) rmSync(dir, { recursive: true, force: true })
 }
 
 /** 列出某游戏的所有隔离档案 */
 export function listIsolatedProfiles(gameDir: string, gameName: string): IsolatedProfileInfo[] {
-  const root = gamePluginsRootDir(gameName, gameDir)
+  const root = resolveGamePluginsRoot(gameDir, gameName)
   if (!existsSync(root)) return []
   try {
     return readdirSync(root)
@@ -348,7 +385,7 @@ export function currentIsolatedProfile(gameDir: string, gameName: string): Isola
   const ini = join(gameDir, 'doorstop_config.ini')
   const target = readDoorstopTarget(ini)
   if (!target) return null
-  const root = gamePluginsRootDir(gameName, gameDir)
+  const root = resolveGamePluginsRoot(gameDir, gameName)
   if (!existsSync(root)) return null
   for (const id of readdirSync(root)) {
     const bep = join(root, id, 'BepInEx')

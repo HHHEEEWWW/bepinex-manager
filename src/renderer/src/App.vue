@@ -186,6 +186,20 @@ async function doRestore(): Promise<void> {
   }
 }
 
+async function doRemoveIsolated(p: IsolatedProfileInfo): Promise<void> {
+  if (!selectedGame.value) return
+  const isCurrent = isolatedCurrent.value?.id === p.id
+  if (!confirm(`确定删除档案「${p.name}」？\n${isCurrent ? '（当前生效档案不可删除，请先切换或还原）' : '该操作不可恢复，档案目录将被整体删除。'}`)) return
+  try {
+    await window.api.isolationRemove(selectedGame.value.gameDir, selectedGame.value.name, p.id)
+    message.success(`已删除档案「${p.name}」`)
+    isolatedList.value = await window.api.isolationList(selectedGame.value.gameDir, selectedGame.value.name)
+    isolatedCurrent.value = await window.api.isolationCurrent(selectedGame.value.gameDir, selectedGame.value.name)
+  } catch (e) {
+    message.error(String(e))
+  }
+}
+
 /** 在文件管理器中打开插件库目录 */
 async function openPluginsRoot(): Promise<void> {
   if (!selectedGame.value?.bepinex) return
@@ -562,16 +576,24 @@ function displayName(p: PluginInfo): string {
             <template v-if="selectedGame.bepinex?.isIsolated">
               <span class="bar-label">🔒 档案</span>
               <template v-if="isolatedList.length">
-                <button
-                  v-for="p in isolatedList"
-                  :key="p.id"
-                  class="profile-chip"
-                  :class="{ active: isolatedCurrent?.id === p.id }"
-                  :title="isolatedCurrent?.id === p.id ? '当前生效档案' : '点击切换（下次启动游戏生效）'"
-                  @click="doSwitchIsolated(p)"
-                >
-                  {{ p.name }}
-                </button>
+                <template v-for="p in isolatedList" :key="p.id">
+                  <button
+                    class="profile-chip"
+                    :class="{ active: isolatedCurrent?.id === p.id }"
+                    :title="isolatedCurrent?.id === p.id ? '当前生效档案' : '点击切换（下次启动游戏生效）'"
+                    @click="doSwitchIsolated(p)"
+                  >
+                    {{ p.name }}
+                  </button>
+                  <button
+                    class="profile-del"
+                    :disabled="isolatedCurrent?.id === p.id"
+                    :title="isolatedCurrent?.id === p.id ? '当前生效档案不可删除（先切换或还原）' : '删除档案'"
+                    @click="doRemoveIsolated(p)"
+                  >
+                    ✕
+                  </button>
+                </template>
               </template>
               <span v-else class="dim">暂无档案</span>
               <button

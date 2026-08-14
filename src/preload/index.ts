@@ -56,6 +56,8 @@ const api = {
     ipcRenderer.invoke(IPC.isolationList, gameDir, gameName),
   isolationCurrent: (gameDir: string, gameName: string): Promise<IsolatedProfileInfo | null> =>
     ipcRenderer.invoke(IPC.isolationCurrent, gameDir, gameName),
+  isolationRemove: (gameDir: string, gameName: string, profileId: string): Promise<boolean> =>
+    ipcRenderer.invoke(IPC.isolationRemove, gameDir, gameName, profileId),
   /** 在文件管理器中打开目录 */
   openPath: (dir: string): Promise<boolean> => ipcRenderer.invoke(IPC.pluginsRootOpen, dir),
 

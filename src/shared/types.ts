@@ -220,6 +220,8 @@ export const IPC = {
   isolationList: 'isolation:list',
   /** 当前生效的隔离档案 */
   isolationCurrent: 'isolation:current',
+  /** 删除隔离档案（当前生效档案受保护） */
+  isolationRemove: 'isolation:remove',
   /** 在文件管理器中打开插件库目录 */
   pluginsRootOpen: 'plugins-root:open'
 } as const
