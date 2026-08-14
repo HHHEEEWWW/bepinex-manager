@@ -9,13 +9,14 @@
  *   BepInEx 6:  BepInEx-Unity.IL2CPP-win-x64-6.0.0-pre.2.zip
  *               BepInEx_UnityIL2CPP_x64_6.0.0-pre.1.zip
  */
-import { createWriteStream, readFileSync, statSync, writeFileSync } from 'fs'
+import { createWriteStream, readFileSync, statSync, writeFileSync, cpSync } from 'fs'
 import { mkdirSync, existsSync, rmSync } from 'fs'
-import { join } from 'path'
+import { join, dirname } from 'path'
 import { pipeline } from 'stream/promises'
 import { Readable } from 'stream'
 import { execFileSync } from 'child_process'
 import type { BepInExRelease, InstallProgress, UnityRuntime } from '@shared/types'
+import { profileDir, newProfileId, writeMeta, pointDoorstopToProfile } from './isolation'
 
 const REPO_API = 'https://api.github.com/repos/BepInEx/BepInEx/releases'
 const REPO = 'BepInEx/BepInEx'
@@ -190,15 +191,8 @@ async function fetchText(url: string): Promise<string> {
   return res.text()
 }
 
-/**
- * 下载并安装 BepInEx 到游戏目录
- * @param gameDir 游戏安装目录
- * @param assetUrl 资产下载 URL
- * @param assetName 资产文件名（用于缓存）
- * @param onProgress 进度回调
- */
-export async function installBepInEx(
-  gameDir: string,
+/** 下载 zip 到缓存目录（带进度回调），返回 zip 路径 */
+async function downloadZip(
   assetUrl: string,
   assetName: string,
   onProgress?: ProgressCallback
@@ -208,8 +202,6 @@ export async function installBepInEx(
   const zipPath = join(cacheDir, assetName)
 
   onProgress?.({ phase: 'download', percent: 0, message: '下载中…' })
-
-  // 下载（支持进度）
   const res = await fetch(assetUrl, {
     headers: { 'User-Agent': 'bepinex-manager', Accept: 'application/octet-stream' },
     redirect: 'follow'
@@ -222,29 +214,50 @@ export async function installBepInEx(
     Readable.fromWeb(res.body as never).on('data', (chunk: Buffer) => {
       received += chunk.length
       if (total > 0) {
-        onProgress?.({ phase: 'download', percent: Math.round((received / total) * 80), message: `下载中… ${Math.round((received / total) * 100)}%` })
+        onProgress?.({
+          phase: 'download',
+          percent: Math.round((received / total) * 80),
+          message: `下载中… ${Math.round((received / total) * 100)}%`
+        })
       }
     }),
     ws
   )
+  return zipPath
+}
 
-  // 解压（PowerShell Expand-Archive，避免额外依赖；zip 解压到游戏目录根）
+/** 解压 zip 到指定目录（PowerShell Expand-Archive，避免额外依赖） */
+function extractZip(zipPath: string, destDir: string): void {
+  execFileSync(
+    'powershell',
+    [
+      '-NoProfile',
+      '-Command',
+      `$ErrorActionPreference='Stop'; Expand-Archive -LiteralPath '${zipPath}' -DestinationPath '${destDir}' -Force`
+    ],
+    { timeout: 300_000, stdio: 'pipe' }
+  )
+}
+
+/**
+ * 下载并安装 BepInEx 到游戏目录（常规模式）
+ */
+export async function installBepInEx(
+  gameDir: string,
+  assetUrl: string,
+  assetName: string,
+  onProgress?: ProgressCallback
+): Promise<string> {
+  const zipPath = await downloadZip(assetUrl, assetName, onProgress)
+
+  // 解压到游戏目录根
   onProgress?.({ phase: 'extract', percent: 85, message: '解压中…' })
   try {
-    execFileSync(
-      'powershell',
-      [
-        '-NoProfile',
-        '-Command',
-        `$ErrorActionPreference='Stop'; Expand-Archive -LiteralPath '${zipPath}' -DestinationPath '${gameDir}' -Force`
-      ],
-      { timeout: 300_000, stdio: 'pipe' }
-    )
+    extractZip(zipPath, gameDir)
   } catch (e) {
     throw new Error(`解压失败: ${(e as Error).message}`)
   }
 
-  // 清理缓存文件
   try {
     rmSync(zipPath, { force: true })
   } catch {
@@ -258,4 +271,67 @@ export async function installBepInEx(
 /** 验证游戏目录是否已存在 BepInEx（安装前检查） */
 export function bepinexAlreadyInstalled(gameDir: string): boolean {
   return existsSync(join(gameDir, 'BepInEx'))
+}
+
+/**
+ * 下载 BepInEx 并直装到插件库（方案 A，推荐）：
+ *   - BepInEx 整树解压到插件库：<dataRoot>/plugins/<gameSlug>/<profileId>/BepInEx/
+ *   - 游戏目录只放注入件（winhttp.dll、.doorstop_version）
+ *   - doorstop_config.ini 指向插件库 preloader → Steam 直接启动即生效
+ */
+export async function installBepInExToLibrary(
+  gameDir: string,
+  gameName: string,
+  assetUrl: string,
+  assetName: string,
+  onProgress?: ProgressCallback
+): Promise<{ profileId: string; target: string }> {
+  const zipPath = await downloadZip(assetUrl, assetName, onProgress)
+
+  // 解压到临时目录，分离 BepInEx/ 与注入件
+  onProgress?.({ phase: 'extract', percent: 85, message: '解压中…' })
+  const tmpDir = join(process.env.TEMP ?? '.', 'bepinex-manager-extract-' + Date.now())
+  mkdirSync(tmpDir, { recursive: true })
+  try {
+    extractZip(zipPath, tmpDir)
+  } catch (e) {
+    throw new Error(`解压失败: ${(e as Error).message}`)
+  }
+
+  const profileId = newProfileId()
+  const destBep = join(profileDir(gameName, gameDir, profileId), 'BepInEx')
+  try {
+    // 1. BepInEx 整树 → 插件库
+    const srcBep = join(tmpDir, 'BepInEx')
+    if (!existsSync(srcBep)) throw new Error('压缩包内未找到 BepInEx 目录')
+    mkdirSync(dirname(destBep), { recursive: true })
+    cpSync(srcBep, destBep, { recursive: true })
+
+    // 2. 注入件 → 游戏目录（仅缺省时复制）
+    for (const inj of ['winhttp.dll', '.doorstop_version']) {
+      const src = join(tmpDir, inj)
+      const dst = join(gameDir, inj)
+      if (existsSync(src) && !existsSync(dst)) cpSync(src, dst, { force: true })
+    }
+    if (!existsSync(join(gameDir, 'winhttp.dll'))) {
+      throw new Error('压缩包内未包含 winhttp.dll（Doorstop 注入器）')
+    }
+
+    // 3. 元数据 + doorstop 指向插件库
+    writeMeta(gameName, gameDir, profileId, {
+      name: '默认',
+      gameName,
+      createdAt: new Date().toISOString()
+    })
+    const target = pointDoorstopToProfile(gameDir, destBep)
+    onProgress?.({ phase: 'done', percent: 100, message: '安装完成（插件库模式）' })
+    return { profileId, target }
+  } finally {
+    try {
+      rmSync(tmpDir, { recursive: true, force: true })
+      rmSync(zipPath, { force: true })
+    } catch {
+      /* 忽略清理失败 */
+    }
+  }
 }

@@ -43,23 +43,25 @@ const api = {
   resetLogOffset: (gameDir: string): Promise<boolean> =>
     ipcRenderer.invoke(IPC.logsResetOffset, gameDir),
 
-  // ---- 档案隔离模式 ----
-  isolationMigrate: (gameDir: string, profileName: string): Promise<{ profileId: string; target: string }> =>
-    ipcRenderer.invoke(IPC.isolationMigrate, gameDir, profileName),
-  isolationSwitch: (gameDir: string, profileId: string): Promise<{ target: string }> =>
-    ipcRenderer.invoke(IPC.isolationSwitch, gameDir, profileId),
-  isolationRestore: (gameDir: string, profileId: string): Promise<boolean> =>
-    ipcRenderer.invoke(IPC.isolationRestore, gameDir, profileId),
-  isolationList: (gameDir: string): Promise<IsolatedProfileInfo[]> =>
-    ipcRenderer.invoke(IPC.isolationList, gameDir),
-  isolationCurrent: (gameDir: string): Promise<IsolatedProfileInfo | null> =>
-    ipcRenderer.invoke(IPC.isolationCurrent, gameDir),
+  // ---- 档案隔离模式（插件库） ----
+  isolationMigrate: (gameDir: string, gameName: string, profileName: string): Promise<{ profileId: string; target: string }> =>
+    ipcRenderer.invoke(IPC.isolationMigrate, gameDir, gameName, profileName),
+  isolationSwitch: (gameDir: string, gameName: string, profileId: string): Promise<{ target: string }> =>
+    ipcRenderer.invoke(IPC.isolationSwitch, gameDir, gameName, profileId),
+  isolationRestore: (gameDir: string, gameName: string, profileId: string): Promise<boolean> =>
+    ipcRenderer.invoke(IPC.isolationRestore, gameDir, gameName, profileId),
+  isolationList: (gameDir: string, gameName: string): Promise<IsolatedProfileInfo[]> =>
+    ipcRenderer.invoke(IPC.isolationList, gameDir, gameName),
+  isolationCurrent: (gameDir: string, gameName: string): Promise<IsolatedProfileInfo | null> =>
+    ipcRenderer.invoke(IPC.isolationCurrent, gameDir, gameName),
+  /** 在文件管理器中打开目录 */
+  openPath: (dir: string): Promise<boolean> => ipcRenderer.invoke(IPC.pluginsRootOpen, dir),
 
   // ---- BepInEx 安装 ----
   listBepInExReleases: (runtime: 'mono' | 'il2cpp'): Promise<BepInExRelease[]> =>
     ipcRenderer.invoke(IPC.bepinexListReleases, runtime),
-  installBepInEx: (gameDir: string, assetUrl: string, assetName: string): Promise<string> =>
-    ipcRenderer.invoke(IPC.bepinexInstall, gameDir, assetUrl, assetName),
+  installBepInEx: (gameDir: string, gameName: string, assetUrl: string, assetName: string): Promise<{ profileId: string; target: string }> =>
+    ipcRenderer.invoke(IPC.bepinexInstall, gameDir, gameName, assetUrl, assetName),
   /** 安装进度事件（返回取消订阅函数） */
   onInstallProgress: (
     cb: (p: { phase: string; percent: number; message: string }) => void

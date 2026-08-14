@@ -7,7 +7,7 @@ import { discoverGames, addManualGame } from './core/games'
 import { detectBepInEx } from './core/bepinex'
 import { scanPlugins, setPluginEnabled } from './core/plugins'
 import { listProfiles, createProfile, deleteProfile, renameProfile, applyProfile } from './core/profiles'
-import { listBepInExReleases, installBepInEx, bepinexAlreadyInstalled } from './core/installer'
+import { listBepInExReleases, installBepInExToLibrary } from './core/installer'
 import { readLog, LogReadResult } from './core/logparser'
 import {
   migrateToIsolated,
@@ -162,26 +162,36 @@ function registerIpcHandlers(): void {  // 发现游戏（Steam 库 + 手动）
     return true
   })
 
-  // ---- 档案隔离模式 ----
-  ipcMain.handle(IPC.isolationMigrate, (_e, gameDir: string, profileName: string) => {
+  // ---- 档案隔离模式（插件库） ----
+  ipcMain.handle(IPC.isolationMigrate, (_e, gameDir: string, gameName: string, profileName: string) => {
     if (!/^[\w\u4e00-\u9fa5 -]{1,40}$/.test(profileName)) {
       throw new Error('档案名只能包含中文/字母/数字/空格/连字符，长度 1-40')
     }
-    return migrateToIsolated(gameDir, profileName)
+    return migrateToIsolated(gameDir, gameName, profileName)
   })
 
-  ipcMain.handle(IPC.isolationSwitch, (_e, gameDir: string, profileName: string) =>
-    switchIsolatedProfile(gameDir, profileName)
+  ipcMain.handle(IPC.isolationSwitch, (_e, gameDir: string, gameName: string, profileId: string) =>
+    switchIsolatedProfile(gameDir, gameName, profileId)
   )
 
-  ipcMain.handle(IPC.isolationRestore, (_e, gameDir: string, profileName: string) => {
-    restoreFromIsolated(gameDir, profileName)
+  ipcMain.handle(IPC.isolationRestore, (_e, gameDir: string, gameName: string, profileId: string) => {
+    restoreFromIsolated(gameDir, gameName, profileId)
     return true
   })
 
-  ipcMain.handle(IPC.isolationList, (_e, gameDir: string) => listIsolatedProfiles(gameDir))
+  ipcMain.handle(IPC.isolationList, (_e, gameDir: string, gameName: string) =>
+    listIsolatedProfiles(gameDir, gameName)
+  )
 
-  ipcMain.handle(IPC.isolationCurrent, (_e, gameDir: string) => currentIsolatedProfile(gameDir))
+  ipcMain.handle(IPC.isolationCurrent, (_e, gameDir: string, gameName: string) =>
+    currentIsolatedProfile(gameDir, gameName)
+  )
+
+  // 在系统文件管理器中打开插件库目录
+  ipcMain.handle(IPC.pluginsRootOpen, async (_e, dir: string) => {
+    const err = await shell.openPath(dir)
+    return err === '' ? true : Promise.reject(new Error(err))
+  })
 
   // ---- BepInEx 安装 ----
   ipcMain.handle(IPC.bepinexListReleases, (_e, runtime: 'mono' | 'il2cpp') =>
@@ -190,12 +200,9 @@ function registerIpcHandlers(): void {  // 发现游戏（Steam 库 + 手动）
 
   ipcMain.handle(
     IPC.bepinexInstall,
-    (_e, gameDir: string, assetUrl: string, assetName: string) => {
-      if (bepinexAlreadyInstalled(gameDir)) {
-        throw new Error('游戏目录已存在 BepInEx，如需覆盖请先手动处理')
-      }
-      return installBepInEx(gameDir, assetUrl, assetName, (p) => {
-        // 进度通过 send 推送到渲染进程
+    (_e, gameDir: string, gameName: string, assetUrl: string, assetName: string) => {
+      // 方案 A：直装插件库（BepInEx 整树在管理器目录，游戏目录只留注入件）
+      return installBepInExToLibrary(gameDir, gameName, assetUrl, assetName, (p) => {
         BrowserWindow.getAllWindows().forEach((w) =>
           w.webContents.send('bepinex:install-progress', p)
         )

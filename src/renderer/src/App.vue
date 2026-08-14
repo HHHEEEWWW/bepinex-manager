@@ -122,8 +122,8 @@ async function selectGame(g: GameEntry): Promise<void> {
     scan.value = await window.api.scanGame(g.gameDir)
     profiles.value = await window.api.listProfiles(g.gameDir)
     if (g.bepinex.isIsolated) {
-      isolatedList.value = await window.api.isolationList(g.gameDir)
-      isolatedCurrent.value = await window.api.isolationCurrent(g.gameDir)
+      isolatedList.value = await window.api.isolationList(g.gameDir, g.name)
+      isolatedCurrent.value = await window.api.isolationCurrent(g.gameDir, g.name)
     }
   } catch (e) {
     message.error(String(e))
@@ -139,10 +139,10 @@ async function doMigrate(): Promise<void> {
   m.busy = true
   m.error = ''
   try {
-    await window.api.isolationMigrate(selectedGame.value.gameDir, m.name.trim())
+    await window.api.isolationMigrate(selectedGame.value.gameDir, selectedGame.value.name, m.name.trim())
     m.busy = false
     m.show = false
-    message.success('已启用档案隔离模式，BepInEx 已迁入档案目录')
+    message.success('已迁入插件库，BepInEx 整树已移到管理器目录')
     await refreshGames()
   } catch (e) {
     m.busy = false
@@ -153,7 +153,7 @@ async function doMigrate(): Promise<void> {
 async function doSwitchIsolated(p: IsolatedProfileInfo): Promise<void> {
   if (!selectedGame.value) return
   try {
-    await window.api.isolationSwitch(selectedGame.value.gameDir, p.id)
+    await window.api.isolationSwitch(selectedGame.value.gameDir, selectedGame.value.name, p.id)
     message.success(`已切换到档案「${p.name}」，下次启动游戏生效`)
     isolatedCurrent.value = p
     scan.value = await window.api.scanGame(selectedGame.value.gameDir)
@@ -165,11 +165,21 @@ async function doSwitchIsolated(p: IsolatedProfileInfo): Promise<void> {
 async function doRestore(): Promise<void> {
   if (!selectedGame.value || !isolatedCurrent.value) return
   const cur = isolatedCurrent.value
-  if (!confirm(`将档案「${cur.name}」还原为常规模式？（BepInEx 复制回游戏目录，档案保留）`)) return
+  if (!confirm(`将档案「${cur.name}」还原为常规模式？（BepInEx 复制回游戏目录，插件库保留）`)) return
   try {
-    await window.api.isolationRestore(selectedGame.value.gameDir, cur.id)
+    await window.api.isolationRestore(selectedGame.value.gameDir, selectedGame.value.name, cur.id)
     message.success('已还原到游戏目录')
     await refreshGames()
+  } catch (e) {
+    message.error(String(e))
+  }
+}
+
+/** 在文件管理器中打开插件库目录 */
+async function openPluginsRoot(): Promise<void> {
+  if (!selectedGame.value?.bepinex) return
+  try {
+    await window.api.openPath(selectedGame.value.bepinex.rootDir)
   } catch (e) {
     message.error(String(e))
   }
@@ -326,9 +336,9 @@ async function doInstall(): Promise<void> {
     installProgress.value = p
   })
   try {
-    await window.api.installBepInEx(selectedGame.value.gameDir, asset.url, asset.name)
+    await window.api.installBepInEx(selectedGame.value.gameDir, selectedGame.value.name, asset.url, asset.name)
     installProgress.value = { phase: 'done', percent: 100, message: '安装完成！' }
-    message.success('BepInEx 安装完成，首次运行游戏将生成配置目录')
+    message.success('BepInEx 安装完成（已直装插件库），首次运行游戏将生成配置目录')
     installBusy.value = false
     showInstallModal.value = false
     await refreshGames()
@@ -476,6 +486,14 @@ function displayName(p: PluginInfo): string {
               {{ selectedGame.bepinex.isMono ? '· Mono' : '· IL2CPP' }}
             </span>
             <span v-if="selectedGame.bepinex?.isIsolated" class="pill pill-isolated">🔒 档案隔离</span>
+            <button
+              v-if="selectedGame.bepinex?.isIsolated"
+              class="btn-plain"
+              title="插件库存储位置（BepInEx 整树在管理器目录，游戏目录只有注入件）"
+              @click="openPluginsRoot"
+            >
+              📂 插件库
+            </button>
             <span v-if="!selectedGame.bepinex" class="pill pill-warn">未检测到 BepInEx</span>
             <button
               v-if="selectedGame.bepinex && !selectedGame.bepinex.isIsolated"
@@ -875,7 +893,7 @@ function displayName(p: PluginInfo): string {
           </div>
 
           <div class="dialog-foot">
-            <span class="dim">下载官方 release，解压到游戏目录；首次运行游戏生成完整目录</span>
+            <span class="dim">直装插件库：BepInEx 整树在管理器目录，游戏目录只保留注入件（Steam 直接启动生效）</span>
             <button class="btn-primary" :disabled="!selectedRelease" @click="doInstall">
               下载并安装
             </button>

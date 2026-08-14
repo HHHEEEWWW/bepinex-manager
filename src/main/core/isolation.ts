@@ -39,20 +39,11 @@ const PRELOADER_NAMES = [
 /** 隔离档案元数据（存于档案目录 profile.json） */
 export interface IsolatedProfileMeta {
   name: string
+  gameName: string
   createdAt: string
 }
 
 export type { IsolatedProfileInfo }
-
-/** 游戏目录哈希键（用于文件系统目录名，过滤非法字符） */
-function gameKey(gameDir: string): string {
-  return (
-    gameDir
-      .toLowerCase()
-      .replace(/[\\/]+$/, '')
-      .replace(/[^a-z0-9]/g, '_') + '_' + hashId(gameDir)
-  )
-}
 
 /** 简单哈希（保证键唯一） */
 function hashId(path: string): string {
@@ -65,35 +56,56 @@ function hashId(path: string): string {
 }
 
 /** 生成 ASCII 档案 id */
-function newProfileId(): string {
+export function newProfileId(): string {
   return 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
 }
 
-/** 某游戏的档案根目录 */
-export function profilesRootDir(gameDir: string): string {
-  return join(dataRootDir(), 'profiles', gameKey(gameDir))
+/**
+ * 插件库目录结构（v2，分游戏存放、目录名全 ASCII）：
+ *   <dataRoot>/plugins/<gameSlug>/<profileId>/
+ *     ├─ profile.json   { name: 显示名, gameName, createdAt }
+ *     └─ BepInEx/
+ */
+export function pluginsRootDir(): string {
+  return join(dataRootDir(), 'plugins')
+}
+
+/** 游戏在插件库中的根目录（按 ASCII 化游戏名 + 短哈希分游戏存放） */
+export function gamePluginsRootDir(gameName: string, gameDir: string): string {
+  const slug =
+    gameName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40) || 'game'
+  return join(pluginsRootDir(), `${slug}-${hashId(gameDir).slice(0, 4)}`)
 }
 
 /** 某档案的目录 */
-export function profileDir(gameDir: string, profileId: string): string {
-  return join(profilesRootDir(gameDir), profileId)
+export function profileDir(gameName: string, gameDir: string, profileId: string): string {
+  return join(gamePluginsRootDir(gameName, gameDir), profileId)
 }
 
 /** 档案元数据文件路径 */
-function metaPath(gameDir: string, profileId: string): string {
-  return join(profileDir(gameDir, profileId), 'profile.json')
+function metaPath(gameName: string, gameDir: string, profileId: string): string {
+  return join(profileDir(gameName, gameDir, profileId), 'profile.json')
 }
 
-function readMeta(gameDir: string, profileId: string): IsolatedProfileMeta {
+function readMeta(gameName: string, gameDir: string, profileId: string): IsolatedProfileMeta {
   try {
-    return JSON.parse(readFileSync(metaPath(gameDir, profileId), 'utf8')) as IsolatedProfileMeta
+    return JSON.parse(readFileSync(metaPath(gameName, gameDir, profileId), 'utf8')) as IsolatedProfileMeta
   } catch {
-    return { name: profileId, createdAt: '' }
+    return { name: profileId, gameName: '', createdAt: '' }
   }
 }
 
-function writeMeta(gameDir: string, profileId: string, meta: IsolatedProfileMeta): void {
-  writeFileSync(metaPath(gameDir, profileId), JSON.stringify(meta, null, 2), 'utf8')
+export function writeMeta(
+  gameName: string,
+  gameDir: string,
+  profileId: string,
+  meta: IsolatedProfileMeta
+): void {
+  writeFileSync(metaPath(gameName, gameDir, profileId), JSON.stringify(meta, null, 2), 'utf8')
 }
 
 /** 在 core 目录找 preloader dll 文件名 */
@@ -143,8 +155,8 @@ export function writeDoorstopTarget(iniPath: string, target: string, isV4: boole
   writeFileSync(iniPath, text, 'utf8')
 }
 
-/** 更新游戏目录 doorstop 指向档案 preloader（迁移/切换共用） */
-function pointDoorstopToProfile(gameDir: string, profileBepInExDir: string): string {
+/** 更新游戏目录 doorstop 指向档案 preloader（迁移/切换/安装共用） */
+export function pointDoorstopToProfile(gameDir: string, profileBepInExDir: string): string {
   const coreDir = join(profileBepInExDir, 'core')
   const preloader = findPreloader(coreDir)
   if (!preloader) throw new Error(`档案目录缺少 preloader dll: ${coreDir}`)
@@ -163,6 +175,7 @@ function pointDoorstopToProfile(gameDir: string, profileBepInExDir: string): str
  */
 export function migrateToIsolated(
   gameDir: string,
+  gameName: string,
   profileName: string
 ): { profileId: string; target: string } {
   const src = join(gameDir, 'BepInEx')
@@ -172,7 +185,7 @@ export function migrateToIsolated(
   }
 
   const profileId = newProfileId()
-  const destBep = join(profileDir(gameDir, profileId), 'BepInEx')
+  const destBep = join(profileDir(gameName, gameDir, profileId), 'BepInEx')
 
   // 备份 doorstop 配置
   const ini = join(gameDir, 'doorstop_config.ini')
@@ -190,7 +203,11 @@ export function migrateToIsolated(
     // 1. 复制 BepInEx 整树（跨盘安全）+ 元数据
     mkdirSync(dirname(destBep), { recursive: true })
     cpSync(src, destBep, { recursive: true })
-    writeMeta(gameDir, profileId, { name: profileName, createdAt: new Date().toISOString() })
+    writeMeta(gameName, gameDir, profileId, {
+      name: profileName,
+      gameName,
+      createdAt: new Date().toISOString()
+    })
 
     // 2. 更新 doorstop target（失败则抛错走回滚）
     const target = pointDoorstopToProfile(gameDir, destBep)
@@ -216,7 +233,7 @@ export function migrateToIsolated(
       }
     }
     try {
-      rmSync(profileDir(gameDir, profileId), { recursive: true, force: true })
+      rmSync(profileDir(gameName, gameDir, profileId), { recursive: true, force: true })
     } catch {
       /* 忽略 */
     }
@@ -225,8 +242,12 @@ export function migrateToIsolated(
 }
 
 /** 切换隔离档案：doorstop target 指向另一档案 */
-export function switchIsolatedProfile(gameDir: string, profileId: string): { target: string } {
-  const dest = join(profileDir(gameDir, profileId), 'BepInEx')
+export function switchIsolatedProfile(
+  gameDir: string,
+  gameName: string,
+  profileId: string
+): { target: string } {
+  const dest = join(profileDir(gameName, gameDir, profileId), 'BepInEx')
   if (!existsSync(join(dest, 'core'))) {
     throw new Error(`档案「${profileId}」不存在或未包含 BepInEx`)
   }
@@ -235,8 +256,8 @@ export function switchIsolatedProfile(gameDir: string, profileId: string): { tar
 }
 
 /** 从隔离模式还原：把档案 BepInEx 复制回游戏目录，恢复原生 doorstop 配置 */
-export function restoreFromIsolated(gameDir: string, profileId: string): void {
-  const src = join(profileDir(gameDir, profileId), 'BepInEx')
+export function restoreFromIsolated(gameDir: string, gameName: string, profileId: string): void {
+  const src = join(profileDir(gameName, gameDir, profileId), 'BepInEx')
   if (!existsSync(src)) throw new Error(`档案「${profileId}」不存在`)
   const dest = join(gameDir, 'BepInEx')
   if (existsSync(dest)) throw new Error('游戏目录已存在 BepInEx，拒绝覆盖')
@@ -252,20 +273,20 @@ export function restoreFromIsolated(gameDir: string, profileId: string): void {
 }
 
 /** 删除隔离档案目录 */
-export function removeIsolatedProfile(gameDir: string, profileId: string): void {
-  const dir = profileDir(gameDir, profileId)
+export function removeIsolatedProfile(gameDir: string, gameName: string, profileId: string): void {
+  const dir = profileDir(gameName, gameDir, profileId)
   if (existsSync(dir)) rmSync(dir, { recursive: true, force: true })
 }
 
 /** 列出某游戏的所有隔离档案 */
-export function listIsolatedProfiles(gameDir: string): IsolatedProfileInfo[] {
-  const root = profilesRootDir(gameDir)
+export function listIsolatedProfiles(gameDir: string, gameName: string): IsolatedProfileInfo[] {
+  const root = gamePluginsRootDir(gameName, gameDir)
   if (!existsSync(root)) return []
   try {
     return readdirSync(root)
       .filter((d) => existsSync(join(root, d, 'BepInEx')))
       .map((id) => {
-        const meta = readMeta(gameDir, id)
+        const meta = readMeta(gameName, gameDir, id)
         return { id, name: meta.name || id, createdAt: meta.createdAt }
       })
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
@@ -275,16 +296,16 @@ export function listIsolatedProfiles(gameDir: string): IsolatedProfileInfo[] {
 }
 
 /** 当前 doorstop 指向的档案（隔离模式下） */
-export function currentIsolatedProfile(gameDir: string): IsolatedProfileInfo | null {
+export function currentIsolatedProfile(gameDir: string, gameName: string): IsolatedProfileInfo | null {
   const ini = join(gameDir, 'doorstop_config.ini')
   const target = readDoorstopTarget(ini)
   if (!target) return null
-  const root = profilesRootDir(gameDir)
+  const root = gamePluginsRootDir(gameName, gameDir)
   if (!existsSync(root)) return null
   for (const id of readdirSync(root)) {
     const bep = join(root, id, 'BepInEx')
     if (existsSync(bep) && target.toLowerCase().startsWith(bep.toLowerCase())) {
-      const meta = readMeta(gameDir, id)
+      const meta = readMeta(gameName, gameDir, id)
       return { id, name: meta.name || id, createdAt: meta.createdAt }
     }
   }
