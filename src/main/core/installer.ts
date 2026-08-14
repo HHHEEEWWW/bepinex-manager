@@ -17,6 +17,7 @@ import { Readable } from 'stream'
 import { execFileSync } from 'child_process'
 import type { BepInExRelease, InstallProgress, UnityRuntime } from '@shared/types'
 import { profileDir, newProfileId, writeMeta, pointDoorstopToProfile } from './isolation'
+import { dataRootDir } from './profiles'
 
 const REPO_API = 'https://api.github.com/repos/BepInEx/BepInEx/releases'
 const REPO = 'BepInEx/BepInEx'
@@ -51,7 +52,7 @@ function asset(tag: string, name: string): { name: string; url: string; size: nu
 
 /** 列出可用 release（含 pre-release），按游戏运行时过滤资产。带 24h 本地缓存。 */
 export async function listBepInExReleases(runtime: UnityRuntime): Promise<BepInExRelease[]> {
-  const cacheDir = join(process.env.TEMP ?? '.', 'bepinex-manager-cache')
+  const cacheDir = join(dataRootDir(), 'cache')
   const cacheFile = join(cacheDir, `releases-${runtime}.json`)
 
   // 优先读缓存（24h 有效）
@@ -191,13 +192,13 @@ async function fetchText(url: string): Promise<string> {
   return res.text()
 }
 
-/** 下载 zip 到缓存目录（带进度回调），返回 zip 路径 */
+/** 下载 zip 到缓存目录（数据根内 cache/，不散落系统临时目录；带进度回调），返回 zip 路径 */
 async function downloadZip(
   assetUrl: string,
   assetName: string,
   onProgress?: ProgressCallback
 ): Promise<string> {
-  const cacheDir = join(process.env.TEMP ?? '.', 'bepinex-manager-cache')
+  const cacheDir = join(dataRootDir(), 'cache')
   mkdirSync(cacheDir, { recursive: true })
   const zipPath = join(cacheDir, assetName)
 
@@ -290,7 +291,7 @@ export async function installBepInExToLibrary(
 
   // 解压到临时目录，分离 BepInEx/ 与注入件
   onProgress?.({ phase: 'extract', percent: 85, message: '解压中…' })
-  const tmpDir = join(process.env.TEMP ?? '.', 'bepinex-manager-extract-' + Date.now())
+  const tmpDir = join(dataRootDir(), 'cache', 'tmp-extract-' + Date.now())
   mkdirSync(tmpDir, { recursive: true })
   try {
     extractZip(zipPath, tmpDir)

@@ -1,6 +1,6 @@
 import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
-import { join } from 'path'
-import { readFileSync, writeFileSync, statSync } from 'fs'
+import { join, dirname } from 'path'
+import { readFileSync, writeFileSync, statSync, mkdirSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { IPC } from '@shared/types'
 import { discoverGames, addManualGame } from './core/games'
@@ -50,8 +50,32 @@ function createWindow(): void {
   }
 }
 
+/**
+ * 数据根目录解析（管理器的全部数据集中存放，不散落）：
+ *   1. 环境变量 BEPINEX_MANAGER_DATA_DIR 显式指定（测试/高级用户）
+ *   2. 打包发布版：安装目录内 <exe 所在目录>/data（随安装目录走，便携）
+ *   3. 开发模式：%APPDATA%/bepinex-manager（沿用现状）
+ */
+function resolveDataRoot(): string {
+  if (process.env.BEPINEX_MANAGER_DATA_DIR) {
+    return process.env.BEPINEX_MANAGER_DATA_DIR
+  }
+  if (app.isPackaged) {
+    return join(dirname(app.getPath('exe')), 'data')
+  }
+  return join(app.getPath('userData'), 'bepinex-manager')
+}
+
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.bepinexmanager.app')
+
+  // 数据根注入 core 层（profiles.ts / isolation.ts / installer.ts 均读取该环境变量）
+  process.env.BEPINEX_MANAGER_DATA_DIR = resolveDataRoot()
+  try {
+    mkdirSync(process.env.BEPINEX_MANAGER_DATA_DIR, { recursive: true })
+  } catch {
+    /* 目录创建失败由具体功能报错 */
+  }
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)

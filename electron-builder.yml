@@ -1,0 +1,40 @@
+# electron-builder 配置
+# 目标：安装版（NSIS，用户可选安装目录）+ 便携版（zip，解压即用）
+# 数据目录策略：全部数据集中在 <安装目录>/data/（随安装目录走，便携，不散落系统目录）
+
+appId: com.bepinexmanager.app
+productName: BepInExManager
+copyright: Copyright © 2026
+
+directories:
+  output: dist
+
+files:
+  - out/**
+
+# 元数据解析工具（.NET）打进安装目录 tools/plugin-metadata-reader/
+extraResources:
+  - from: tools/plugin-metadata-reader/bin/Release/net9.0/
+    to: tools/plugin-metadata-reader
+    filter:
+      - "*.exe"
+      - "*.dll"
+      - "*.json"
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: zip
+      arch: [x64]
+
+nsis:
+  oneClick: false          # 向导式安装
+  perMachine: false        # 按用户安装（无需管理员）
+  allowToChangeInstallationDirectory: true   # 用户可选择安装目录
+  createDesktopShortcut: true
+  shortcutName: BepInEx 管理器
+  artifactName: BepInExManager-${version}-setup.${ext}
+
+# 便携版命名
+artifactName: BepInExManager-${version}-portable.${ext}

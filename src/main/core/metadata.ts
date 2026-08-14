@@ -14,8 +14,13 @@ import { existsSync } from 'fs'
 import { join, dirname } from 'path'
 import type { BepInExInfo, PluginInfo, PluginMetadata } from '@shared/types'
 
-/** 向上探测工具目录（找到含 csproj 的目录为止，最多 6 级） */
-function findToolDir(): string | null {
+/**
+ * 工具目录定位策略（兼容 dev / 独立脚本 / 正式打包三种布局）：
+ *   dev/脚本:   <root>/tools/plugin-metadata-reader/bin/Release/net9.0/plugin-metadata-reader.exe
+ *   正式打包:   <installDir>/tools/plugin-metadata-reader/plugin-metadata-reader.exe（publish 单文件）
+ * 定位顺序：环境变量 → 从 __dirname 逐级向上找 exe → 找 csproj（可自动构建）
+ */
+function findTool(): { dir: string; exe: string; buildable: boolean } | null {
   const candidates: string[] = []
   if (process.env.BEPINEX_MANAGER_TOOLS_DIR) {
     candidates.push(process.env.BEPINEX_MANAGER_TOOLS_DIR)
@@ -25,31 +30,47 @@ function findToolDir(): string | null {
     candidates.push(join(dir, 'tools', 'plugin-metadata-reader'))
     dir = dirname(dir)
   }
-  return candidates.find((d) => existsSync(join(d, 'plugin-metadata-reader.csproj'))) ?? null
+
+  for (const c of candidates) {
+    // 打包布局：publish 单文件 exe 直接在目录内
+    const publishExe = join(c, 'plugin-metadata-reader.exe')
+    if (existsSync(publishExe)) return { dir: c, exe: publishExe, buildable: false }
+    // dev 布局：bin/Release/net9.0/
+    const devExe = join(c, 'bin', 'Release', 'net9.0', 'plugin-metadata-reader.exe')
+    if (existsSync(devExe)) return { dir: c, exe: devExe, buildable: false }
+    // 源码布局：可触发 dotnet build
+    if (existsSync(join(c, 'plugin-metadata-reader.csproj'))) {
+      return { dir: c, exe: devExe, buildable: true }
+    }
+  }
+  return null
 }
 
-const TOOL_DIR = findToolDir() ?? ''
-const TOOL_EXE = TOOL_DIR ? join(TOOL_DIR, 'bin', 'Release', 'net9.0', 'plugin-metadata-reader.exe') : ''
+const tool = findTool()
 
 let toolReady: boolean | null = null
 
 /** 确保 C# 工具已构建（只尝试一次，失败则本次会话不再重试） */
 function ensureTool(): boolean {
   if (toolReady !== null) return toolReady
-  if (!TOOL_DIR) {
+  if (!tool) {
     toolReady = false
     return false
   }
-  if (existsSync(TOOL_EXE)) {
+  if (existsSync(tool.exe)) {
     toolReady = true
     return true
   }
+  if (!tool.buildable) {
+    toolReady = false
+    return false
+  }
   try {
-    const r = spawnSync('dotnet', ['build', TOOL_DIR, '-c', 'Release', '--nologo', '-v', 'q'], {
+    const r = spawnSync('dotnet', ['build', tool.dir, '-c', 'Release', '--nologo', '-v', 'q'], {
       encoding: 'utf8',
       timeout: 180_000
     })
-    toolReady = r.status === 0 && existsSync(TOOL_EXE)
+    toolReady = r.status === 0 && existsSync(tool.exe)
     if (!toolReady && r.stderr) console.error('[metadata] dotnet build failed:', r.stderr.slice(0, 800))
   } catch (e) {
     console.error('[metadata] dotnet build error:', e)
@@ -69,7 +90,7 @@ export function resolvePluginMetadata(plugins: PluginInfo[], bepinex: BepInExInf
 
   try {
     const r = spawnSync(
-      TOOL_EXE,
+      tool!.exe,
       ['--core', bepinex.coreDir, '--plugins', bepinex.pluginsDir],
       {
         input: dlls.join('\n') + '\n',
