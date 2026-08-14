@@ -50,8 +50,6 @@ const api = {
     ipcRenderer.invoke(IPC.isolationCreate, gameDir, gameName, profileName),
   isolationSwitch: (gameDir: string, gameName: string, profileId: string): Promise<{ target: string }> =>
     ipcRenderer.invoke(IPC.isolationSwitch, gameDir, gameName, profileId),
-  isolationRestore: (gameDir: string, gameName: string, profileId: string): Promise<boolean> =>
-    ipcRenderer.invoke(IPC.isolationRestore, gameDir, gameName, profileId),
   isolationList: (gameDir: string, gameName: string): Promise<IsolatedProfileInfo[]> =>
     ipcRenderer.invoke(IPC.isolationList, gameDir, gameName),
   isolationCurrent: (gameDir: string, gameName: string): Promise<IsolatedProfileInfo | null> =>

@@ -11,7 +11,7 @@ import {
   migrateToIsolated,
   createIsolatedProfile,
   switchIsolatedProfile,
-  restoreFromIsolated,
+  removeIsolatedProfile,
   listIsolatedProfiles,
   currentIsolatedProfile,
   profileDir,
@@ -117,14 +117,22 @@ try {
   if (!cur2 || cur2.name !== '联机档') throw new Error('切换后识别失败')
   console.log('切换/识别 ✅（当前=' + cur2.name + '）')
 
-  console.log('\n=== 5. 还原到游戏目录 ===')
-  restoreFromIsolated(gameDir, GAME_NAME, m.profileId)
-  if (!existsSync(join(gameDir, 'BepInEx', 'plugins'))) throw new Error('还原后 BepInEx 缺失')
-  const ini2 = readFileSync(join(gameDir, 'doorstop_config.ini'), 'utf8')
-  if (!/target_assembly\s*=\s*BepInEx\\core\\/.test(ini2)) throw new Error('还原后 target 应为相对路径')
-  const info2 = detectBepInEx(gameDir)
-  if (!info2 || info2.isIsolated) throw new Error('还原后应恢复常规模式')
-  console.log('还原 ✅')
+  console.log('\n=== 6. 删除档案（当前生效受保护） ===')
+  let protectedOk = false
+  try {
+    removeIsolatedProfile(gameDir, GAME_NAME, id2)
+  } catch {
+    protectedOk = true // 当前生效档案不可删除
+  }
+  if (!protectedOk) throw new Error('当前生效档案应受保护')
+  // 切回第一个档案后再删除 id2
+  switchIsolatedProfile(gameDir, GAME_NAME, m.profileId)
+  removeIsolatedProfile(gameDir, GAME_NAME, id2)
+  const list3 = listIsolatedProfiles(gameDir, GAME_NAME)
+  if (list3.length !== 2 || list3.some((p) => p.id === id2)) {
+    throw new Error('删除后列表错误: ' + JSON.stringify(list3))
+  }
+  console.log('删除档案 ✅（当前生效受保护，非生效档案可删）')
 
   console.log('\n✅ 插件库验证全部通过')
 } finally {

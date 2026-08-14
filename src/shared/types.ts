@@ -214,8 +214,6 @@ export const IPC = {
   isolationCreate: 'isolation:create',
   /** 切换隔离档案（改 doorstop target） */
   isolationSwitch: 'isolation:switch',
-  /** 从隔离模式还原到游戏目录 */
-  isolationRestore: 'isolation:restore',
   /** 列出隔离档案 */
   isolationList: 'isolation:list',
   /** 当前生效的隔离档案 */

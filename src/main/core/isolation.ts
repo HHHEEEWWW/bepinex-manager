@@ -336,23 +336,6 @@ export function switchIsolatedProfile(
   return { target }
 }
 
-/** 从隔离模式还原：把档案 BepInEx 复制回游戏目录，恢复原生 doorstop 配置 */
-export function restoreFromIsolated(gameDir: string, gameName: string, profileId: string): void {
-  const src = join(profileDir(gameName, gameDir, profileId), 'BepInEx')
-  if (!existsSync(src)) throw new Error(`档案「${profileId}」不存在`)
-  const dest = join(gameDir, 'BepInEx')
-  if (existsSync(dest)) throw new Error('游戏目录已存在 BepInEx，拒绝覆盖')
-
-  cpSync(src, dest, { recursive: true })
-
-  // 恢复 doorstop target 为游戏目录内的 preloader（相对路径，兼容 Steam 启动）
-  const preloader = findPreloader(join(dest, 'core'))
-  const isV4 = doorstopIsV4(gameDir)
-  if (preloader) {
-    writeDoorstopTarget(join(gameDir, 'doorstop_config.ini'), `BepInEx\\core\\${preloader}`, isV4)
-  }
-}
-
 /** 删除隔离档案目录（保护：当前生效档案不可删除） */
 export function removeIsolatedProfile(gameDir: string, gameName: string, profileId: string): void {
   const cur = currentIsolatedProfile(gameDir, gameName)

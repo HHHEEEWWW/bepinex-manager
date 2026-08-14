@@ -173,19 +173,6 @@ async function doSwitchIsolated(p: IsolatedProfileInfo): Promise<void> {
   }
 }
 
-async function doRestore(): Promise<void> {
-  if (!selectedGame.value || !isolatedCurrent.value) return
-  const cur = isolatedCurrent.value
-  if (!confirm(`将档案「${cur.name}」还原为常规模式？（BepInEx 复制回游戏目录，插件库保留）`)) return
-  try {
-    await window.api.isolationRestore(selectedGame.value.gameDir, selectedGame.value.name, cur.id)
-    message.success('已还原到游戏目录')
-    await refreshGames()
-  } catch (e) {
-    message.error(String(e))
-  }
-}
-
 async function doRemoveIsolated(p: IsolatedProfileInfo): Promise<void> {
   if (!selectedGame.value) return
   const isCurrent = isolatedCurrent.value?.id === p.id
@@ -527,14 +514,6 @@ function displayName(p: PluginInfo): string {
               @click="isolateModal = { show: true, mode: 'migrate', name: '', busy: false, error: '' }"
             >
               📦 启用档案隔离
-            </button>
-            <button
-              v-if="selectedGame.bepinex?.isIsolated"
-              class="btn-plain"
-              title="把当前档案复制回游戏目录，恢复常规模式"
-              @click="doRestore"
-            >
-              ↩ 还原到游戏目录
             </button>
             <button v-if="selectedGame.bepinex" class="btn-plain" title="查看 BepInEx 运行日志" @click="openLogModal">
               📋 日志

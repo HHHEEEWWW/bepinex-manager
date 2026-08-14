@@ -13,7 +13,6 @@ import {
   migrateToIsolated,
   createIsolatedProfile,
   switchIsolatedProfile,
-  restoreFromIsolated,
   listIsolatedProfiles,
   currentIsolatedProfile,
   removeIsolatedProfile
@@ -209,11 +208,6 @@ function registerIpcHandlers(): void {  // 发现游戏（Steam 库 + 手动）
   ipcMain.handle(IPC.isolationSwitch, (_e, gameDir: string, gameName: string, profileId: string) =>
     switchIsolatedProfile(gameDir, gameName, profileId)
   )
-
-  ipcMain.handle(IPC.isolationRestore, (_e, gameDir: string, gameName: string, profileId: string) => {
-    restoreFromIsolated(gameDir, gameName, profileId)
-    return true
-  })
 
   ipcMain.handle(IPC.isolationList, (_e, gameDir: string, gameName: string) =>
     listIsolatedProfiles(gameDir, gameName)
