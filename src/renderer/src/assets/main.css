@@ -6,31 +6,17 @@
   padding: 0;
 }
 
-:root {
-  --bg: #16181d;
-  --bg-panel: #1e2128;
-  --bg-hover: #262a33;
-  --border: #31363f;
-  --text: #e6e8ec;
-  --text-dim: #9aa3af;
-  --accent: #4c9aff;
-  --accent-dim: #2f6bb3;
-  --green: #3fb96a;
-  --red: #e05d5d;
-  --mono: Consolas, 'Courier New', monospace;
+html,
+body,
+#app {
+  height: 100%;
+  overflow: hidden;
 }
 
 body {
   font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
-  background: var(--bg);
-  color: var(--text);
   font-size: 14px;
   user-select: none;
-}
-
-button {
-  font-family: inherit;
-  cursor: pointer;
 }
 
 ::-webkit-scrollbar {
@@ -38,9 +24,16 @@ button {
   height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--border);
+  background: rgba(128, 128, 128, 0.35);
   border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(128, 128, 128, 0.55);
 }
 ::-webkit-scrollbar-track {
   background: transparent;
+}
+
+.mono {
+  font-family: Consolas, 'Courier New', monospace;
 }

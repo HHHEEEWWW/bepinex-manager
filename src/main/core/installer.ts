@@ -18,8 +18,35 @@ import { execFileSync } from 'child_process'
 import type { BepInExRelease, InstallProgress, UnityRuntime } from '@shared/types'
 
 const REPO_API = 'https://api.github.com/repos/BepInEx/BepInEx/releases'
+const REPO = 'BepInEx/BepInEx'
+const DOWNLOAD_BASE = `https://github.com/${REPO}/releases/download`
+const ATOM_URL = `https://github.com/${REPO}/releases.atom`
+const ASSETS_URL = (tag: string): string => `https://github.com/${REPO}/releases/expanded_assets/${encodeURIComponent(tag)}`
 
 export type ProgressCallback = (p: InstallProgress) => void
+
+/** 兜底版本列表：GitHub API 限流/离线时使用。下载 URL 模式固定，不依赖 API。 */
+const DEFAULT_RELEASES: BepInExRelease[] = [
+  {
+    tag: 'v5.4.23.5',
+    prerelease: false,
+    publishedAt: '2025-01-01',
+    assets: [asset('v5.4.23.5', 'BepInEx_win_x64_5.4.23.5.zip')]
+  },
+  {
+    tag: 'v6.0.0-pre.2',
+    prerelease: true,
+    publishedAt: '2025-01-01',
+    assets: [
+      asset('v6.0.0-pre.2', 'BepInEx-Unity.IL2CPP-win-x64-6.0.0-pre.2.zip'),
+      asset('v6.0.0-pre.2', 'BepInEx-Unity.Mono-win-x64-6.0.0-pre.2.zip')
+    ]
+  }
+]
+
+function asset(tag: string, name: string): { name: string; url: string; size: number } {
+  return { name, url: `${DOWNLOAD_BASE}/${tag}/${name}`, size: 0 }
+}
 
 /** 列出可用 release（含 pre-release），按游戏运行时过滤资产。带 24h 本地缓存。 */
 export async function listBepInExReleases(runtime: UnityRuntime): Promise<BepInExRelease[]> {
@@ -40,7 +67,7 @@ export async function listBepInExReleases(runtime: UnityRuntime): Promise<BepInE
 
   const res = await fetch(REPO_API + '?per_page=20', { headers: { 'User-Agent': 'bepinex-manager' } })
   if (!res.ok) {
-    // 限流/网络失败时回退到旧缓存（若存在）
+    // 限流/网络失败时：缓存 → GitHub 网页（Atom + expanded_assets，不受 API 限流）→ 内置列表
     try {
       if (existsSync(cacheFile)) {
         return JSON.parse(readFileSync(cacheFile, 'utf8')) as BepInExRelease[]
@@ -48,7 +75,13 @@ export async function listBepInExReleases(runtime: UnityRuntime): Promise<BepInE
     } catch {
       /* 无缓存可用 */
     }
-    throw new Error(`GitHub API ${res.status}: ${res.statusText}`)
+    try {
+      const web = await fetchReleasesFromWeb(runtime)
+      if (web.length > 0) return web
+    } catch {
+      /* 网页抓取失败则继续回退 */
+    }
+    return DEFAULT_RELEASES.filter((r) => r.assets.some((a) => isMatchingAsset(a.name, runtime)))
   }
   const data = (await res.json()) as Array<{
     tag_name: string
@@ -98,6 +131,63 @@ export function isMatchingAsset(name: string, runtime: UnityRuntime): boolean {
     return /unity(?:\.|\s)?il2cpp/.test(lower)
   }
   return /unity(?:\.|\s)?mono/.test(lower) || /^bepinex_win_x64/.test(lower)
+}
+
+/**
+ * 通过 GitHub 网页端点获取 release 列表（不受 API 限流限制）：
+ *   1. releases.atom —— 最新 release 的 tag 与发布时间
+ *   2. releases/expanded_assets/<tag> —— 每个 release 的资产清单
+ */
+async function fetchReleasesFromWeb(runtime: UnityRuntime): Promise<BepInExRelease[]> {
+  const atom = await fetchText(ATOM_URL)
+  // Atom 中每个 entry 形如：
+  //   <title>BepInEx v5.4.23.5</title> <updated>2025-xx-xxT..</updated> <link href=".../releases/tag/v5.4.23.5"/>
+  const entries: Array<{ tag: string; updated: string }> = []
+  const entryRe = /<entry>([\s\S]*?)<\/entry>/g
+  let em: RegExpExecArray | null
+  while ((em = entryRe.exec(atom)) !== null) {
+    const block = em[1]
+    const tagMatch = block.match(/releases\/tag\/([^"<]+)/)
+    const updated = block.match(/<updated>([^<]+)</)
+    if (tagMatch) {
+      entries.push({ tag: decodeURIComponent(tagMatch[1]), updated: updated?.[1] ?? '' })
+    }
+  }
+
+  const releases: BepInExRelease[] = []
+  // 并行抓资产清单（限制并发避免被反爬）
+  for (const e of entries.slice(0, 12)) {
+    const html = await fetchText(ASSETS_URL(e.tag))
+    // 资产链接形如：/BepInEx/BepInEx/releases/download/<tag>/<assetName>
+    const assets = new Map<string, string>()
+    const assetRe = /\/BepInEx\/BepInEx\/releases\/download\/[^"']+\/([^"'<]+)/g
+    let am: RegExpExecArray | null
+    while ((am = assetRe.exec(html)) !== null) {
+      assets.set(am[1], `${DOWNLOAD_BASE}/${encodeURIComponent(e.tag)}/${am[1]}`)
+    }
+    const list = [...assets.entries()]
+      .map(([name, url]) => ({ name, url, size: 0 }))
+      .filter((a) => isMatchingAsset(a.name, runtime))
+    if (list.length > 0) {
+      releases.push({
+        tag: e.tag,
+        prerelease: /pre|beta|alpha|rc/i.test(e.tag),
+        publishedAt: e.updated.slice(0, 10) || 'unknown',
+        assets: list
+      })
+    }
+  }
+  return releases
+}
+
+/** 抓取文本（带 UA，短超时） */
+async function fetchText(url: string): Promise<string> {
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) bepinex-manager' },
+    redirect: 'follow'
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`)
+  return res.text()
 }
 
 /**

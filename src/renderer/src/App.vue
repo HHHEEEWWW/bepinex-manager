@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, computed } from 'vue'
+import { createDiscreteApi, darkTheme } from 'naive-ui'
 import type {
   GameEntry,
   GameScanResult,
@@ -8,17 +9,19 @@ import type {
   BepInExRelease
 } from '@shared/types'
 
+const { message } = createDiscreteApi(['message'], {
+  configProviderProps: { theme: darkTheme }
+})
+
 const games = ref<GameEntry[]>([])
 const selectedGame = ref<GameEntry | null>(null)
 const scan = ref<GameScanResult | null>(null)
 const loading = ref(false)
-const error = ref('')
 
 // ---- Profile 档案 ----
 const profiles = ref<ProfileDef[]>([])
 const profileNameInput = ref('')
 const applyingProfile = ref(false)
-const profileMsg = ref('')
 
 // ---- BepInEx 安装 ----
 const showInstallModal = ref(false)
@@ -27,25 +30,35 @@ const loadingReleases = ref(false)
 const selectedRelease = ref<BepInExRelease | null>(null)
 const selectedAssetIndex = ref(0)
 const installProgress = ref<{ phase: string; percent: number; message: string } | null>(null)
-const installError = ref('')
+const installBusy = ref(false)
 
-const configEditor = ref<{ plugin: PluginInfo; content: string; saving: boolean; saveError: string } | null>(
-  null
-)
+// ---- 配置编辑器 ----
+const configEditor = ref<{ plugin: PluginInfo; content: string; saving: boolean } | null>(null)
 
 onMounted(async () => {
   try {
     games.value = await window.api.discoverGames()
+    if (games.value.length > 0 && !selectedGame.value) {
+      await selectGame(games.value[0])
+    }
   } catch (e) {
-    error.value = `发现游戏失败: ${e}`
+    message.error(`发现游戏失败: ${e}`)
   }
 })
 
+const enabledCount = computed(() => scan.value?.plugins.filter((p) => p.enabled).length ?? 0)
+
 async function refreshGames(): Promise<void> {
   try {
+    const prevId = selectedGame.value?.id
     games.value = await window.api.discoverGames()
+    if (prevId) {
+      const g = games.value.find((x) => x.id === prevId)
+      if (g) await selectGame(g)
+    }
+    message.success('游戏列表已刷新')
   } catch (e) {
-    error.value = `刷新游戏列表失败: ${e}`
+    message.error(`刷新游戏列表失败: ${e}`)
   }
 }
 
@@ -54,24 +67,47 @@ async function addManualGame(): Promise<void> {
   if (g) {
     games.value.push(g)
     await selectGame(g)
+    message.success(`已添加 ${g.name}`)
   }
 }
 
 async function selectGame(g: GameEntry): Promise<void> {
   selectedGame.value = g
-  loading.value = true
-  error.value = ''
   scan.value = null
   profiles.value = []
-  profileMsg.value = ''
+  loading.value = true
+  // 无 BepInEx：显示安装引导
+  if (!g.bepinex) {
+    loading.value = false
+    return
+  }
   try {
     scan.value = await window.api.scanGame(g.gameDir)
     profiles.value = await window.api.listProfiles(g.gameDir)
   } catch (e) {
-    error.value = String(e)
+    message.error(String(e))
   } finally {
     loading.value = false
   }
+}
+
+async function togglePlugin(p: PluginInfo): Promise<void> {
+  if (!selectedGame.value) return
+  const target = !p.enabled
+  try {
+    await window.api.setPluginEnabled(selectedGame.value.gameDir, p.id, target)
+    p.enabled = target
+    message.success(target ? `已启用 ${displayName(p)}` : `已禁用 ${displayName(p)}`)
+  } catch (e) {
+    message.error(String(e))
+  }
+}
+
+/** 检查依赖是否缺失 */
+function missingDeps(p: PluginInfo): string[] {
+  if (!scan.value || !p.meta || p.meta.dependencies.length === 0) return []
+  const known = new Set(scan.value.plugins.filter((x) => x.meta?.guid).map((x) => x.meta!.guid))
+  return p.meta.dependencies.filter((d) => !known.has(d))
 }
 
 // ---- Profile 操作 ----
@@ -79,7 +115,7 @@ async function saveCurrentAsProfile(): Promise<void> {
   if (!selectedGame.value || !scan.value) return
   const name = profileNameInput.value.trim()
   if (!name) {
-    profileMsg.value = '请输入档案名称'
+    message.warning('请输入档案名称')
     return
   }
   const states: Record<string, boolean> = {}
@@ -88,25 +124,27 @@ async function saveCurrentAsProfile(): Promise<void> {
     const created = await window.api.createProfile(selectedGame.value.gameDir, name, states)
     profiles.value.push(created)
     profileNameInput.value = ''
-    profileMsg.value = `已保存档案「${created.name}」（${Object.keys(states).length} 个插件状态）`
+    message.success(`已保存档案「${created.name}」`)
   } catch (e) {
-    profileMsg.value = `保存失败: ${e}`
+    message.error(`保存失败: ${e}`)
   }
 }
 
 async function applyProfileState(p: ProfileDef): Promise<void> {
   if (!selectedGame.value) return
   applyingProfile.value = true
-  profileMsg.value = ''
   try {
     const result = await window.api.applyProfile(selectedGame.value.gameDir, p.id)
-    profileMsg.value = `已应用「${p.name}」：${result.applied} 项变更${result.rolledBack ? `，回滚 ${result.rolledBack} 项` : ''}`
-    // 重新扫描插件状态
+    if (result.rolledBack > 0) {
+      message.warning(`应用「${p.name}」：${result.applied} 项变更，回滚 ${result.rolledBack} 项`)
+    } else {
+      message.success(`已应用「${p.name}」：${result.applied} 项变更`)
+    }
     if (selectedGame.value) {
       scan.value = await window.api.scanGame(selectedGame.value.gameDir)
     }
   } catch (e) {
-    profileMsg.value = `应用失败: ${e}`
+    message.error(`应用失败: ${e}`)
   } finally {
     applyingProfile.value = false
   }
@@ -114,27 +152,54 @@ async function applyProfileState(p: ProfileDef): Promise<void> {
 
 async function removeProfile(p: ProfileDef): Promise<void> {
   if (!selectedGame.value) return
-  if (!confirm(`删除档案「${p.name}」？（不影响已安装的插件）`)) return
   await window.api.deleteProfile(selectedGame.value.gameDir, p.id)
   profiles.value = profiles.value.filter((x) => x.id !== p.id)
-  profileMsg.value = `已删除「${p.name}」`
+  message.info(`已删除「${p.name}」`)
+}
+
+// ---- 配置编辑 ----
+async function openConfig(p: PluginInfo): Promise<void> {
+  if (!p.configFile) return
+  try {
+    const content = await window.api.readConfigFile(p.configFile)
+    configEditor.value = { plugin: p, content, saving: false }
+  } catch (e) {
+    message.error(`读取配置失败: ${e}`)
+  }
+}
+
+async function saveConfig(): Promise<void> {
+  if (!configEditor.value) return
+  const ed = configEditor.value
+  ed.saving = true
+  try {
+    await window.api.writeConfigFile(ed.plugin.configFile!, ed.content)
+    ed.saving = false
+    configEditor.value = null
+    message.success('配置已保存，游戏重启后生效')
+  } catch (e) {
+    ed.saving = false
+    message.error(`保存失败: ${e}`)
+  }
 }
 
 // ---- BepInEx 安装 ----
 async function openInstallModal(): Promise<void> {
-  if (!selectedGame.value) return
   showInstallModal.value = true
-  installError.value = ''
   installProgress.value = null
+  installBusy.value = false
   selectedRelease.value = null
   selectedAssetIndex.value = 0
   loadingReleases.value = true
   releases.value = []
   try {
-    const runtime = selectedGame.value.bepinex?.isMono ? 'mono' : 'il2cpp'
+    const runtime = selectedGame.value?.bepinex?.isMono ? 'mono' : 'il2cpp'
     releases.value = await window.api.listBepInExReleases(runtime)
+    if (releases.value.length === 0) {
+      message.warning('没有可用版本，请稍后重试')
+    }
   } catch (e) {
-    installError.value = `获取版本列表失败: ${e}`
+    message.error(`获取版本列表失败: ${e}`)
   } finally {
     loadingReleases.value = false
   }
@@ -149,70 +214,32 @@ async function doInstall(): Promise<void> {
   if (!selectedGame.value || !selectedRelease.value) return
   const asset = selectedRelease.value.assets[selectedAssetIndex.value]
   if (!asset) return
-  installError.value = ''
+  installBusy.value = true
   installProgress.value = { phase: 'download', percent: 0, message: '准备中…' }
   const unsubscribe = window.api.onInstallProgress((p) => {
     installProgress.value = p
   })
   try {
     await window.api.installBepInEx(selectedGame.value.gameDir, asset.url, asset.name)
-    installProgress.value = { phase: 'done', percent: 100, message: '安装完成！首次运行游戏将生成配置目录。' }
+    installProgress.value = { phase: 'done', percent: 100, message: '安装完成！' }
+    message.success('BepInEx 安装完成，首次运行游戏将生成配置目录')
+    installBusy.value = false
+    showInstallModal.value = false
+    await refreshGames()
   } catch (e) {
-    installError.value = String(e)
+    installBusy.value = false
     installProgress.value = null
+    message.error(`安装失败: ${e}`)
   } finally {
     unsubscribe()
   }
 }
 
-async function togglePlugin(p: PluginInfo): Promise<void> {
-  if (!selectedGame.value) return
-  const target = !p.enabled
-  try {
-    await window.api.setPluginEnabled(selectedGame.value.gameDir, p.id, target)
-    p.enabled = target
-  } catch (e) {
-    error.value = String(e)
-  }
-}
-
-/** 检查依赖是否缺失（不在当前全部插件 guid 集合中） */
-function missingDeps(p: PluginInfo): string[] {
-  if (!scan.value || !p.meta || p.meta.dependencies.length === 0) return []
-  const known = new Set(
-    scan.value.plugins.filter((x) => x.meta?.guid).map((x) => x.meta!.guid)
-  )
-  return p.meta.dependencies.filter((d) => !known.has(d))
-}
-
-async function openConfig(p: PluginInfo): Promise<void> {
-  if (!p.configFile) return
-  try {
-    const content = await window.api.readConfigFile(p.configFile)
-    configEditor.value = { plugin: p, content, saving: false, saveError: '' }
-  } catch (e) {
-    error.value = `读取配置失败: ${e}`
-  }
-}
-
-async function saveConfig(): Promise<void> {
-  if (!configEditor.value) return
-  const ed = configEditor.value
-  ed.saving = true
-  ed.saveError = ''
-  try {
-    await window.api.writeConfigFile(ed.plugin.configFile!, ed.content)
-    ed.saving = false
-  } catch (e) {
-    ed.saving = false
-    ed.saveError = String(e)
-  }
-}
-
 function fmtSize(bytes: number): string {
+  if (bytes <= 0) return '—'
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(2)} MB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
 function displayName(p: PluginInfo): string {
@@ -222,232 +249,269 @@ function displayName(p: PluginInfo): string {
 
 <template>
   <div class="layout">
-    <!-- 左侧：游戏列表 -->
+    <!-- ============ 左侧：游戏列表 ============ -->
     <aside class="sidebar">
-      <div class="sidebar-header">
-        <span class="logo">🧩 BepInEx Manager</span>
-        <button class="btn btn-sm" title="刷新游戏列表" @click="refreshGames">↻</button>
+      <div class="brand">
+        <div class="brand-logo">🧩</div>
+        <div class="brand-text">
+          <div class="brand-title">BepInEx Manager</div>
+          <div class="brand-sub">插件目录级管理</div>
+        </div>
+        <button class="icon-btn" title="刷新游戏列表" @click="refreshGames">↻</button>
       </div>
+
       <div class="game-list">
         <div
           v-for="g in games"
           :key="g.id"
-          class="game-item"
+          class="game-card"
           :class="{ active: selectedGame?.id === g.id }"
           @click="selectGame(g)"
         >
           <div class="game-name">{{ g.name }}</div>
-          <div class="game-sub">
-            <span :class="['badge', g.bepinex ? 'badge-ok' : 'badge-none']">
-              {{ g.bepinex ? `BepInEx ${g.bepinex.majorVersion}` : '无 BepInEx' }}
-            </span>
+          <div class="game-meta">
+            <span v-if="g.bepinex" class="pill pill-ok">BepInEx {{ g.bepinex.majorVersion }}</span>
+            <span v-else class="pill pill-off">无 BepInEx</span>
             <span class="game-source">{{ g.source === 'steam' ? 'Steam' : '手动' }}</span>
           </div>
         </div>
-        <div v-if="games.length === 0" class="empty-tip">未发现游戏</div>
+        <div v-if="games.length === 0" class="empty-side">未发现游戏</div>
       </div>
-      <div class="sidebar-footer">
-        <button class="btn btn-primary btn-block" @click="addManualGame">+ 手动添加游戏目录</button>
+
+      <div class="sidebar-foot">
+        <button class="add-btn" @click="addManualGame">＋ 手动添加游戏目录</button>
       </div>
     </aside>
 
-    <!-- 右侧：插件管理 -->
+    <!-- ============ 右侧：内容区 ============ -->
     <main class="content">
-      <template v-if="!selectedGame">
-        <div class="placeholder">← 选择一个游戏查看插件</div>
-      </template>
+      <!-- 未选择 -->
+      <div v-if="!selectedGame" class="center-box">
+        <div class="center-icon">🎮</div>
+        <div class="center-text dim">从左侧选择一个游戏</div>
+      </div>
+
       <template v-else>
-        <header class="content-header">
-          <div class="header-row">
-            <div>
-              <div class="game-title">{{ selectedGame.name }}</div>
-              <div class="game-detail">
-                {{ selectedGame.gameDir }}
-                <span v-if="selectedGame.bepinex" class="badge badge-ok">
-                  BepInEx {{ selectedGame.bepinex.version ?? selectedGame.bepinex.majorVersion }}
-                  {{ selectedGame.bepinex.isMono ? '(Mono)' : '(IL2CPP)' }}
-                </span>
-                <span v-if="!selectedGame.bepinex" class="badge badge-warn">未检测到 BepInEx</span>
-              </div>
-            </div>
-            <button
-              v-if="!selectedGame.bepinex"
-              class="btn btn-primary"
-              @click="openInstallModal"
-            >
+        <!-- 头部 -->
+        <header class="head">
+          <div class="head-main">
+            <div class="head-title">{{ selectedGame.name }}</div>
+            <div class="head-path mono dim">{{ selectedGame.gameDir }}</div>
+          </div>
+          <div class="head-badges">
+            <span v-if="selectedGame.bepinex" class="pill pill-ok">
+              BepInEx {{ selectedGame.bepinex.version ?? selectedGame.bepinex.majorVersion }}
+              {{ selectedGame.bepinex.isMono ? '· Mono' : '· IL2CPP' }}
+            </span>
+            <span v-else class="pill pill-warn">未检测到 BepInEx</span>
+            <button v-if="!selectedGame.bepinex" class="btn-primary" @click="openInstallModal">
               ⬇ 安装 BepInEx
             </button>
           </div>
         </header>
 
-        <div v-if="error" class="error-bar">{{ error }}</div>
-        <div v-if="loading" class="placeholder">扫描中…</div>
+        <!-- 无 BepInEx 引导 -->
+        <div v-if="!selectedGame.bepinex && !loading" class="center-box">
+          <div class="center-icon">🪄</div>
+          <div class="center-title">该游戏未安装 BepInEx</div>
+          <div class="center-text dim">BepInEx 是 Unity / XNA 游戏的插件框架，安装后即可扫描管理插件。</div>
+          <button class="btn-primary big" @click="openInstallModal">⬇ 一键安装 BepInEx</button>
+        </div>
 
+        <!-- 扫描中 -->
+        <div v-else-if="loading" class="center-box">
+          <div class="loading-ring"></div>
+          <div class="center-text dim">正在扫描插件…</div>
+        </div>
+
+        <!-- 插件管理 -->
         <template v-else-if="scan">
-          <!-- Profile 档案栏 -->
+          <!-- 档案栏 -->
           <div class="profile-bar">
-            <span class="profile-label">📁 档案</span>
-            <div v-if="profiles.length" class="profile-list">
+            <span class="bar-label">📁 档案</span>
+            <template v-if="profiles.length">
               <button
                 v-for="p in profiles"
                 :key="p.id"
-                class="btn btn-sm profile-chip"
+                class="profile-chip"
                 :disabled="applyingProfile"
-                :title="`应用：${Object.keys(p.pluginStates).length} 个插件状态`"
+                :title="`应用「${p.name}」（${Object.keys(p.pluginStates).length} 个插件状态）`"
                 @click="applyProfileState(p)"
               >
                 {{ p.name }}
               </button>
-            </div>
+              <button
+                v-for="p in profiles"
+                :key="'x' + p.id"
+                class="profile-del"
+                title="删除档案"
+                @click="removeProfile(p)"
+              >
+                ✕
+              </button>
+            </template>
             <span v-else class="dim">暂无档案</span>
             <input
               v-model="profileNameInput"
               class="profile-input"
-              placeholder="档案名称"
+              placeholder="新档案名称…"
               @keyup.enter="saveCurrentAsProfile"
             />
-            <button class="btn btn-sm btn-primary" @click="saveCurrentAsProfile">保存当前状态</button>
-            <button
-              v-for="p in profiles"
-              :key="'del-' + p.id"
-              class="btn btn-sm btn-danger profile-del"
-              :title="`删除 ${p.name}`"
-              @click="removeProfile(p)"
-            >
-              ✕
-            </button>
-            <span v-if="profileMsg" class="profile-msg">{{ profileMsg }}</span>
+            <button class="btn-plain" @click="saveCurrentAsProfile">保存当前状态</button>
           </div>
-          <div class="plugin-summary">
-            共 {{ scan.plugins.length }} 个插件（启用 {{ scan.plugins.filter((p) => p.enabled).length }}）
+
+          <!-- 插件统计 -->
+          <div class="stat-line">
+            共 <b>{{ scan.plugins.length }}</b> 个插件
+            <span class="stat-dot ok"></span>启用 {{ enabledCount }}
+            <span class="stat-dot off"></span>禁用 {{ scan.plugins.length - enabledCount }}
           </div>
+
+          <!-- 插件列表 -->
           <div class="plugin-list">
-            <div v-for="p in scan.plugins" :key="p.id" class="plugin-row" :class="{ disabled: !p.enabled }">
-              <div class="plugin-main">
-                <div class="plugin-name">
-                  {{ displayName(p) }}
-                  <span v-if="p.meta" class="plugin-version">{{ p.meta.version }}</span>
+            <div
+              v-for="p in scan.plugins"
+              :key="p.id"
+              class="plugin-card"
+              :class="{ off: !p.enabled }"
+            >
+              <div class="plugin-left">
+                <div class="plugin-name-row">
+                  <span class="plugin-name">{{ displayName(p) }}</span>
+                  <span v-if="p.meta" class="ver-tag">{{ p.meta.version }}</span>
+                  <span v-if="!p.enabled" class="pill pill-off">已禁用</span>
+                  <span v-if="p.metaError" class="pill pill-warn" :title="p.metaError">元数据读取失败</span>
                 </div>
-                <div class="plugin-meta mono">
-                  <span v-if="p.meta">{{ p.meta.guid }}</span>
-                  <span v-else class="dim">{{ p.fileName }}</span>
-                  <span class="dim">· {{ fmtSize(p.sizeBytes) }}</span>
-                  <span v-if="p.metaError" class="badge badge-warn" :title="p.metaError">元数据读取失败</span>
+                <div class="plugin-guid mono dim">
+                  {{ p.meta ? p.meta.guid : p.fileName }}
+                  <span class="sep">·</span> {{ fmtSize(p.sizeBytes) }}
                 </div>
-                <div v-if="missingDeps(p).length" class="plugin-deps-warn">
+                <div v-if="missingDeps(p).length" class="dep-warn">
                   ⚠ 缺少依赖：{{ missingDeps(p).join(', ') }}
                 </div>
-                <div v-else-if="p.meta && p.meta.dependencies.length" class="plugin-deps dim">
+                <div v-else-if="p.meta && p.meta.dependencies.length" class="dep-ok dim">
                   依赖：{{ p.meta.dependencies.join(', ') }}
                 </div>
               </div>
-              <div class="plugin-actions">
+              <div class="plugin-right">
                 <button
                   v-if="p.configFile"
-                  class="btn btn-sm"
-                  title="编辑配置"
+                  class="btn-plain"
+                  title="编辑配置文件"
                   @click="openConfig(p)"
                 >
-                  配置
+                  ⚙ 配置
                 </button>
                 <button
-                  class="btn btn-sm"
-                  :class="p.enabled ? 'btn-danger' : 'btn-primary'"
+                  class="switch-btn"
+                  :class="p.enabled ? 'on' : 'off'"
                   @click="togglePlugin(p)"
                 >
-                  {{ p.enabled ? '禁用' : '启用' }}
+                  {{ p.enabled ? '启用中' : '已禁用' }}
                 </button>
               </div>
             </div>
-            <div v-if="scan.plugins.length === 0" class="empty-tip">plugins 目录下没有插件</div>
+
+            <div v-if="scan.plugins.length === 0" class="center-box">
+              <div class="center-icon">📭</div>
+              <div class="center-text dim">plugins 目录下还没有插件</div>
+            </div>
           </div>
         </template>
       </template>
     </main>
   </div>
 
-  <!-- 配置编辑器弹窗 -->
-  <div v-if="configEditor" class="modal-mask" @click.self="configEditor = null">
-    <div class="modal">
-      <div class="modal-header">
-        <span>{{ displayName(configEditor.plugin) }} — 配置</span>
-        <button class="btn btn-sm" @click="configEditor = null">✕</button>
+  <!-- ============ 配置编辑器弹窗 ============ -->
+  <div v-if="configEditor" class="mask" @click.self="configEditor = null">
+    <div class="dialog cfg-dialog">
+      <div class="dialog-head">
+        <span>⚙ {{ displayName(configEditor.plugin) }} — 配置</span>
+        <button class="icon-btn" @click="configEditor = null">✕</button>
       </div>
       <textarea
         v-model="configEditor.content"
         class="cfg-editor mono"
         spellcheck="false"
       ></textarea>
-      <div class="modal-footer">
-        <span v-if="configEditor.saveError" class="error-text">{{ configEditor.saveError }}</span>
-        <span v-else class="dim">修改 BepInEx 配置，游戏重启后生效</span>
-        <button class="btn btn-primary" :disabled="configEditor.saving" @click="saveConfig">
+      <div class="dialog-foot">
+        <span class="dim">修改后需重启游戏生效</span>
+        <button class="btn-primary" :disabled="configEditor.saving" @click="saveConfig">
           {{ configEditor.saving ? '保存中…' : '保存' }}
         </button>
       </div>
     </div>
   </div>
 
-  <!-- BepInEx 安装弹窗 -->
-  <div v-if="showInstallModal" class="modal-mask" @click.self="showInstallModal = false">
-    <div class="modal">
-      <div class="modal-header">
+  <!-- ============ BepInEx 安装弹窗 ============ -->
+  <div v-if="showInstallModal" class="mask" @click.self="showInstallModal = false">
+    <div class="dialog install-dialog">
+      <div class="dialog-head">
         <span>⬇ 安装 BepInEx — {{ selectedGame?.name }}</span>
-        <button class="btn btn-sm" @click="showInstallModal = false">✕</button>
+        <button class="icon-btn" @click="showInstallModal = false">✕</button>
       </div>
-      <div class="install-body">
-        <div v-if="loadingReleases" class="placeholder">获取版本列表…</div>
+
+      <div v-if="loadingReleases" class="center-box slim">
+        <div class="loading-ring"></div>
+        <div class="center-text dim">获取版本列表…</div>
+      </div>
+
+      <template v-else>
+        <!-- 进度 -->
+        <div v-if="installProgress" class="progress-area">
+          <div class="progress-track">
+            <div class="progress-fill" :style="{ width: installProgress.percent + '%' }"></div>
+          </div>
+          <div class="dim">{{ installProgress.message }}</div>
+        </div>
+
         <template v-else>
-          <div v-if="installError" class="error-text">{{ installError }}</div>
-          <div v-if="releases.length === 0 && !installError" class="dim">
-            没有可用版本（可能是网络问题或 API 限流）
-          </div>
-          <div v-if="installProgress" class="install-progress">
-            <div class="progress-track">
-              <div class="progress-fill" :style="{ width: installProgress.percent + '%' }"></div>
-            </div>
-            <div class="dim">{{ installProgress.message }}</div>
-          </div>
-          <template v-if="!installProgress">
-            <div class="release-list">
-              <div
-                v-for="r in releases"
-                :key="r.tag"
-                class="release-item"
-                :class="{ active: selectedRelease?.tag === r.tag }"
-                @click="pickRelease(r)"
-              >
-                <div class="release-name">
-                  {{ r.tag }}
-                  <span v-if="r.prerelease" class="badge badge-warn">pre</span>
-                  <span class="dim release-date">{{ r.publishedAt.slice(0, 10) }}</span>
-                </div>
-                <div v-if="selectedRelease?.tag === r.tag" class="asset-picker">
-                  <label
-                    v-for="(a, i) in r.assets"
-                    :key="a.name"
-                    class="asset-option"
-                  >
-                    <input type="radio" :checked="selectedAssetIndex === i" @change="selectedAssetIndex = i" />
-                    <span>{{ a.name }}</span>
-                    <span class="dim">({{ (a.size / 1024 / 1024).toFixed(1) }} MB)</span>
-                  </label>
+          <div class="release-list">
+            <div
+              v-for="r in releases"
+              :key="r.tag"
+              class="release-card"
+              :class="{ active: selectedRelease?.tag === r.tag }"
+              @click="pickRelease(r)"
+            >
+              <div class="release-top">
+                <span class="release-tag">{{ r.tag }}</span>
+                <span v-if="r.prerelease" class="pill pill-warn">pre-release</span>
+                <span class="release-date dim">{{ r.publishedAt }}</span>
+              </div>
+              <div v-if="selectedRelease?.tag === r.tag" class="asset-list">
+                <label
+                  v-for="(a, i) in r.assets"
+                  :key="a.name"
+                  class="asset-opt"
+                  :class="{ checked: selectedAssetIndex === i }"
+                >
+                  <input
+                    type="radio"
+                    :checked="selectedAssetIndex === i"
+                    @change="selectedAssetIndex = i"
+                  />
+                  <span class="mono">{{ a.name }}</span>
+                  <span class="dim">{{ fmtSize(a.size) }}</span>
+                </label>
+                <div v-if="r.assets.length === 0" class="dim asset-empty">
+                  该版本没有匹配此游戏的安装包
                 </div>
               </div>
             </div>
-            <div class="modal-footer">
-              <span class="dim">首次运行游戏后将生成完整目录结构</span>
-              <button
-                class="btn btn-primary"
-                :disabled="!selectedRelease"
-                @click="doInstall"
-              >
-                下载并安装
-              </button>
+            <div v-if="releases.length === 0" class="center-box slim">
+              <div class="center-text dim">暂时拿不到版本列表，请稍后重试</div>
             </div>
-          </template>
+          </div>
+
+          <div class="dialog-foot">
+            <span class="dim">下载官方 release，解压到游戏目录；首次运行游戏生成完整目录</span>
+            <button class="btn-primary" :disabled="!selectedRelease" @click="doInstall">
+              下载并安装
+            </button>
+          </div>
         </template>
-      </div>
+      </template>
     </div>
   </div>
 </template>
@@ -456,394 +520,596 @@ function displayName(p: PluginInfo): string {
 .layout {
   display: flex;
   height: 100vh;
+  background: #14161a;
+  color: #e8eaee;
 }
 
-/* 侧栏 */
+.dim {
+  color: #8b93a1;
+}
+
+/* ============ 侧栏 ============ */
 .sidebar {
-  width: 280px;
+  width: 292px;
   flex-shrink: 0;
-  background: var(--bg-panel);
-  border-right: 1px solid var(--border);
+  background: #1a1d23;
+  border-right: 1px solid #2a2e37;
   display: flex;
   flex-direction: column;
 }
-.sidebar-header {
+.brand {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--border);
+  gap: 10px;
+  padding: 16px 14px 12px;
 }
-.logo {
-  font-weight: 600;
+.brand-logo {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #4c9aff, #7a5cff);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 19px;
+  box-shadow: 0 4px 14px rgba(90, 100, 255, 0.35);
+}
+.brand-title {
+  font-weight: 700;
   font-size: 15px;
+  letter-spacing: 0.2px;
+}
+.brand-sub {
+  font-size: 11px;
+  color: #8b93a1;
+  margin-top: 1px;
 }
 .game-list {
   flex: 1;
   overflow-y: auto;
-  padding: 8px;
+  padding: 4px 10px 10px;
 }
-.game-item {
+.game-card {
+  border-radius: 10px;
   padding: 10px 12px;
-  border-radius: 8px;
+  margin-bottom: 6px;
   cursor: pointer;
-  margin-bottom: 4px;
+  border: 1px solid transparent;
+  transition: background 0.12s ease, border-color 0.12s ease;
 }
-.game-item:hover {
-  background: var(--bg-hover);
+.game-card:hover {
+  background: #22262e;
 }
-.game-item.active {
-  background: var(--accent-dim);
+.game-card.active {
+  background: rgba(76, 154, 255, 0.13);
+  border-color: rgba(76, 154, 255, 0.45);
 }
 .game-name {
   font-weight: 600;
-  margin-bottom: 4px;
+  font-size: 13.5px;
+  margin-bottom: 5px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.game-sub {
+.game-meta {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
-  color: var(--text-dim);
 }
-.sidebar-footer {
+.game-source {
+  font-size: 11px;
+  color: #8b93a1;
+}
+.empty-side {
+  padding: 30px 0;
+  text-align: center;
+  color: #8b93a1;
+  font-size: 13px;
+}
+.sidebar-foot {
   padding: 10px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid #2a2e37;
+}
+.add-btn {
+  width: 100%;
+  padding: 9px;
+  border-radius: 8px;
+  border: 1px dashed #3a3f4b;
+  background: transparent;
+  color: #9aa4b2;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.add-btn:hover {
+  border-color: #4c9aff;
+  color: #4c9aff;
+  background: rgba(76, 154, 255, 0.06);
 }
 
-/* 内容区 */
+/* ============ 徽章 ============ */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  padding: 2px 9px;
+  border-radius: 20px;
+  white-space: nowrap;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+.pill-ok {
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.12);
+  border: 1px solid rgba(74, 222, 128, 0.3);
+}
+.pill-off {
+  color: #8b93a1;
+  background: rgba(139, 147, 161, 0.1);
+  border: 1px solid rgba(139, 147, 161, 0.25);
+}
+.pill-warn {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+}
+
+/* ============ 内容区 ============ */
 .content {
   flex: 1;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-width: 0;
 }
-.content-header {
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--border);
-}
-.game-title {
-  font-size: 18px;
-  font-weight: 700;
-  margin-bottom: 4px;
-}
-.game-detail {
-  font-size: 12px;
-  color: var(--text-dim);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.plugin-summary {
-  padding: 10px 18px 0;
-  font-size: 13px;
-  color: var(--text-dim);
-}
-.plugin-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 10px 18px 18px;
-}
-.plugin-row {
+.head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 12px 14px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  margin-bottom: 8px;
+  gap: 16px;
+  padding: 16px 22px 14px;
+  border-bottom: 1px solid #242831;
 }
-.plugin-row.disabled {
-  opacity: 0.55;
+.head-title {
+  font-size: 19px;
+  font-weight: 700;
 }
-.plugin-name {
-  font-weight: 600;
+.head-path {
+  font-size: 11.5px;
+  margin-top: 4px;
+  user-select: text;
+}
+.head-badges {
   display: flex;
   align-items: center;
-  gap: 8px;
-}
-.plugin-version {
-  font-size: 12px;
-  color: var(--accent);
-  background: rgba(76, 154, 255, 0.12);
-  padding: 1px 8px;
-  border-radius: 10px;
-}
-.plugin-meta {
-  font-size: 12px;
-  color: var(--text-dim);
-  margin-top: 4px;
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  align-items: center;
-}
-.plugin-deps {
-  font-size: 12px;
-  margin-top: 4px;
-}
-.plugin-deps-warn {
-  font-size: 12px;
-  margin-top: 4px;
-  color: #e8b04b;
-}
-.plugin-actions {
-  display: flex;
-  gap: 8px;
+  gap: 10px;
   flex-shrink: 0;
 }
 
-/* 通用 */
-.btn {
-  border: 1px solid var(--border);
-  background: var(--bg-hover);
-  color: var(--text);
-  border-radius: 6px;
-  padding: 6px 14px;
-  font-size: 13px;
-}
-.btn:hover {
-  border-color: var(--accent);
-}
-.btn-sm {
-  padding: 4px 10px;
-  font-size: 12px;
-}
-.btn-primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-.btn-danger {
-  background: transparent;
-  border-color: var(--red);
-  color: var(--red);
-}
-.btn-block {
-  width: 100%;
-}
-.badge {
-  font-size: 11px;
-  padding: 1px 8px;
-  border-radius: 10px;
-  white-space: nowrap;
-}
-.badge-ok {
-  background: rgba(63, 185, 106, 0.15);
-  color: var(--green);
-}
-.badge-none {
-  background: rgba(154, 163, 175, 0.15);
-  color: var(--text-dim);
-}
-.badge-warn {
-  background: rgba(232, 176, 75, 0.15);
-  color: #e8b04b;
-}
-.dim {
-  color: var(--text-dim);
-}
-.mono {
-  font-family: var(--mono);
-}
-.placeholder {
-  padding: 40px;
-  text-align: center;
-  color: var(--text-dim);
-}
-.empty-tip {
-  padding: 24px;
-  text-align: center;
-  color: var(--text-dim);
-}
-.error-bar {
-  margin: 10px 18px 0;
-  padding: 8px 12px;
-  background: rgba(224, 93, 93, 0.12);
-  border: 1px solid var(--red);
-  border-radius: 8px;
-  color: var(--red);
-  font-size: 13px;
-}
-.error-text {
-  color: var(--red);
-  font-size: 12px;
-}
-
-/* 弹窗 */
-.modal-mask {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 10;
-}
-.modal {
-  width: min(680px, 90vw);
-  height: min(520px, 85vh);
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
-  font-weight: 600;
-}
-.cfg-editor {
-  flex: 1;
-  background: #121419;
-  color: #c8d0da;
-  border: none;
-  outline: none;
-  resize: none;
-  padding: 12px 14px;
-  font-size: 13px;
-  line-height: 1.5;
-  user-select: text;
-}
-.modal-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 10px 14px;
-  border-top: 1px solid var(--border);
-}
-
-/* 头部行 + 安装按钮 */
-.header-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-/* Profile 档案栏 */
+/* 档案栏 */
 .profile-bar {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  padding: 8px 18px;
-  border-bottom: 1px solid var(--border);
+  padding: 10px 22px;
+  border-bottom: 1px solid #242831;
   font-size: 13px;
 }
-.profile-label {
-  font-weight: 600;
-  white-space: nowrap;
-}
-.profile-list {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
+.bar-label {
+  font-weight: 700;
+  font-size: 12.5px;
+  color: #c6ccd6;
 }
 .profile-chip {
-  border-radius: 14px;
+  border: 1px solid #343a46;
+  background: #1e222a;
+  color: #c9d1dc;
+  border-radius: 16px;
+  padding: 4px 13px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.12s ease;
 }
-.profile-input {
-  background: #121419;
-  border: 1px solid var(--border);
-  color: var(--text);
-  border-radius: 6px;
-  padding: 5px 10px;
-  font-size: 13px;
-  width: 140px;
-  outline: none;
+.profile-chip:hover {
+  border-color: #4c9aff;
+  color: #4c9aff;
 }
-.profile-input:focus {
-  border-color: var(--accent);
+.profile-chip:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 .profile-del {
-  padding: 4px 7px;
+  border: none;
+  background: transparent;
+  color: #6b7280;
+  cursor: pointer;
   font-size: 11px;
+  padding: 2px;
+  margin-left: -4px;
 }
-.profile-msg {
-  color: var(--text-dim);
-  font-size: 12px;
+.profile-del:hover {
+  color: #f87171;
+}
+.profile-input {
+  background: #12151a;
+  border: 1px solid #343a46;
+  color: #e8eaee;
+  border-radius: 8px;
+  padding: 5px 12px;
+  font-size: 12.5px;
+  width: 150px;
+  outline: none;
+  transition: border-color 0.12s ease;
+}
+.profile-input:focus {
+  border-color: #4c9aff;
+}
+.profile-input::placeholder {
+  color: #5b6472;
 }
 
-/* 安装弹窗 */
-.install-body {
+/* 统计行 */
+.stat-line {
+  padding: 12px 22px 6px;
+  font-size: 12.5px;
+  color: #9aa4b2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.stat-line b {
+  color: #e8eaee;
+}
+.stat-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-left: 10px;
+}
+.stat-dot.ok {
+  background: #4ade80;
+}
+.stat-dot.off {
+  background: #6b7280;
+}
+
+/* 插件卡片 */
+.plugin-list {
   flex: 1;
   overflow-y: auto;
-  padding: 14px;
+  padding: 8px 22px 22px;
+}
+.plugin-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  background: #1b1f26;
+  border: 1px solid #272c35;
+  border-radius: 12px;
+  padding: 13px 16px;
+  margin-bottom: 8px;
+  transition: opacity 0.15s ease, border-color 0.12s ease;
+}
+.plugin-card:hover {
+  border-color: #38404d;
+}
+.plugin-card.off {
+  opacity: 0.52;
+}
+.plugin-left {
+  min-width: 0;
+}
+.plugin-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.plugin-name {
+  font-weight: 700;
+  font-size: 14px;
+}
+.ver-tag {
+  font-size: 11px;
+  color: #7cb3ff;
+  background: rgba(76, 154, 255, 0.12);
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+.plugin-guid {
+  font-size: 11.5px;
+  margin-top: 4px;
+  user-select: text;
+}
+.sep {
+  margin: 0 4px;
+  color: #4a5260;
+}
+.dep-warn {
+  font-size: 12px;
+  margin-top: 4px;
+  color: #fbbf24;
+}
+.dep-ok {
+  font-size: 12px;
+  margin-top: 4px;
+}
+.plugin-right {
+  display: flex;
+  gap: 10px;
+  flex-shrink: 0;
+  align-items: center;
+}
+.switch-btn {
+  min-width: 76px;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid;
+  transition: all 0.12s ease;
+}
+.switch-btn.on {
+  color: #f87171;
+  background: transparent;
+  border-color: rgba(248, 113, 113, 0.5);
+}
+.switch-btn.on:hover {
+  background: rgba(248, 113, 113, 0.1);
+}
+.switch-btn.off {
+  color: #fff;
+  background: #4c9aff;
+  border-color: #4c9aff;
+}
+.switch-btn.off:hover {
+  background: #3d86e8;
+}
+
+/* 按钮 */
+.btn-primary {
+  border: none;
+  background: linear-gradient(135deg, #4c9aff, #5f7cff);
+  color: #fff;
+  border-radius: 8px;
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 0.12s ease, transform 0.06s ease;
+  box-shadow: 0 3px 12px rgba(76, 122, 255, 0.3);
+}
+.btn-primary:hover {
+  filter: brightness(1.1);
+}
+.btn-primary:active {
+  transform: scale(0.98);
+}
+.btn-primary.big {
+  padding: 11px 26px;
+  font-size: 14.5px;
+}
+.btn-primary:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.btn-plain {
+  border: 1px solid #343a46;
+  background: transparent;
+  color: #c9d1dc;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.btn-plain:hover {
+  border-color: #4c9aff;
+  color: #4c9aff;
+}
+.icon-btn {
+  border: none;
+  background: transparent;
+  color: #8b93a1;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: all 0.12s ease;
+}
+.icon-btn:hover {
+  color: #e8eaee;
+  background: #262b34;
+}
+
+/* 居中占位 */
+.center-box {
+  flex: 1;
   display: flex;
   flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 40px;
+  text-align: center;
+}
+.center-box.slim {
+  padding: 26px;
+}
+.center-icon {
+  font-size: 40px;
+}
+.center-title {
+  font-size: 17px;
+  font-weight: 700;
+}
+.center-text {
+  font-size: 13px;
+  max-width: 420px;
+  line-height: 1.6;
+}
+.loading-ring {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 3px solid #2a2f3a;
+  border-top-color: #4c9aff;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ============ 弹窗 ============ */
+.mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 10, 14, 0.62);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+.dialog {
+  background: #1c2027;
+  border: 1px solid #2c323c;
+  border-radius: 14px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.cfg-dialog {
+  width: min(720px, 92vw);
+  height: min(560px, 88vh);
+}
+.install-dialog {
+  width: min(640px, 92vw);
+  height: min(560px, 88vh);
+}
+.dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 16px;
+  border-bottom: 1px solid #2a2f39;
+  font-weight: 700;
+  font-size: 14px;
+}
+.dialog-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-top: 1px solid #2a2f39;
+  font-size: 12px;
+}
+.cfg-editor {
+  flex: 1;
+  background: #12151a;
+  color: #c9d3de;
+  border: none;
+  outline: none;
+  resize: none;
+  padding: 14px 16px;
+  font-size: 13px;
+  line-height: 1.55;
+  user-select: text;
+}
+
+/* 安装弹窗内容 */
+.release-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 16px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.release-card {
+  border: 1px solid #2c323c;
+  border-radius: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.release-card:hover {
+  background: #21262f;
+}
+.release-card.active {
+  border-color: #4c9aff;
+  background: rgba(76, 154, 255, 0.07);
+}
+.release-top {
+  display: flex;
+  align-items: center;
   gap: 10px;
 }
-.release-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.release-item {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px 12px;
-  cursor: pointer;
-}
-.release-item:hover {
-  background: var(--bg-hover);
-}
-.release-item.active {
-  border-color: var(--accent);
-}
-.release-name {
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.release-tag {
+  font-weight: 700;
+  font-size: 13.5px;
 }
 .release-date {
-  font-weight: 400;
   font-size: 12px;
+  margin-left: auto;
 }
-.asset-picker {
-  margin-top: 8px;
-  padding: 8px;
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.asset-option {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  cursor: pointer;
-}
-.install-progress {
+.asset-list {
+  margin-top: 10px;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 8px;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 8px 0;
+}
+.asset-opt {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12.5px;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+  transition: background 0.1s ease;
+}
+.asset-opt:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.asset-opt.checked {
+  background: rgba(76, 154, 255, 0.12);
+}
+.asset-empty {
+  font-size: 12px;
+  padding: 4px 6px;
+}
+.progress-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 24px;
+  font-size: 13px;
 }
 .progress-track {
-  height: 8px;
-  background: #121419;
-  border-radius: 4px;
+  height: 10px;
+  background: #12151a;
+  border-radius: 6px;
   overflow: hidden;
 }
 .progress-fill {
   height: 100%;
-  background: var(--accent);
+  background: linear-gradient(90deg, #4c9aff, #7a5cff);
+  border-radius: 6px;
   transition: width 0.15s ease;
 }
 </style>
