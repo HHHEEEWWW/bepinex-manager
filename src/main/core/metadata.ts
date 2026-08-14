@@ -5,23 +5,41 @@
  * 特性提取 GUID / 名称 / 版本 / 依赖，绝不执行插件代码。
  *
  * 工具首次使用时自动 dotnet build；失败时插件保留 meta=null 并记录 metaError。
+ *
+ * 工具目录定位策略：环境变量覆盖 → 从 __dirname 逐级向上探测
+ * （兼容 dev 打包产物 out/main、独立脚本、正式打包等不同运行位置）。
  */
 import { spawnSync } from 'child_process'
 import { existsSync } from 'fs'
-import { join } from 'path'
+import { join, dirname } from 'path'
 import type { BepInExInfo, PluginInfo, PluginMetadata } from '@shared/types'
 
-// 允许环境变量覆盖工具目录（独立脚本验证时用）
-const TOOL_DIR =
-  process.env.BEPINEX_MANAGER_TOOLS_DIR ||
-  join(__dirname, '..', '..', '..', 'tools', 'plugin-metadata-reader')
-const TOOL_EXE = join(TOOL_DIR, 'bin', 'Release', 'net9.0', 'plugin-metadata-reader.exe')
+/** 向上探测工具目录（找到含 csproj 的目录为止，最多 6 级） */
+function findToolDir(): string | null {
+  const candidates: string[] = []
+  if (process.env.BEPINEX_MANAGER_TOOLS_DIR) {
+    candidates.push(process.env.BEPINEX_MANAGER_TOOLS_DIR)
+  }
+  let dir = __dirname
+  for (let i = 0; i < 6; i++) {
+    candidates.push(join(dir, 'tools', 'plugin-metadata-reader'))
+    dir = dirname(dir)
+  }
+  return candidates.find((d) => existsSync(join(d, 'plugin-metadata-reader.csproj'))) ?? null
+}
+
+const TOOL_DIR = findToolDir() ?? ''
+const TOOL_EXE = TOOL_DIR ? join(TOOL_DIR, 'bin', 'Release', 'net9.0', 'plugin-metadata-reader.exe') : ''
 
 let toolReady: boolean | null = null
 
 /** 确保 C# 工具已构建（只尝试一次，失败则本次会话不再重试） */
 function ensureTool(): boolean {
   if (toolReady !== null) return toolReady
+  if (!TOOL_DIR) {
+    toolReady = false
+    return false
+  }
   if (existsSync(TOOL_EXE)) {
     toolReady = true
     return true
