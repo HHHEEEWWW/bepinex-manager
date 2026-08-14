@@ -15,6 +15,9 @@
 - ✅ **启用/禁用**：dll 在 `plugins` ↔ `plugins-disabled` 之间移动（跨 BepInEx 5/6 兼容，不污染游戏文件）
 - ✅ **依赖检查**：自动标出缺失依赖的插件
 - ✅ **配置编辑**：读取/编辑 `BepInEx/config/<GUID>.cfg`（BepInEx 配置，重启游戏生效）
+- ✅ **Profile 档案系统**：保存/应用插件启停状态快照（应用失败自动回滚，不触碰 BepInEx 框架本体）
+- ✅ **BepInEx 一键安装**：从 GitHub 官方 release 下载（BepInEx 5 稳定版 + 6.x pre），按 Mono/IL2CPP
+  自动过滤资产，进度条 + 24h 本地缓存（API 限流时回退缓存）
 
 ## 技术栈
 
@@ -84,8 +87,24 @@ BepInEx 只加载 `BepInEx/plugins/` 下的 dll。本项目将禁用的插件移
 ## 路线图
 
 - [ ] 打包分发（electron-builder NSIS）
-- [ ] Profile 档案系统（多套插件组合切换）
-- [ ] BepInEx 一键安装/更新（下载 BepInExPack）
+- [ ] **Profile 隔离模式（v2）**：参考 r2modman 的 Doorstop 方案，BepInEx 整树常驻独立目录，
+      游戏根目录只留 winhttp.dll + doorstop_config.ini（target 指向 profile 的 preloader），
+      从 Steam 直接启动即可生效，切换 profile 零搬移（调研结论：BEPINEX_PLUGINS_PATH 环境变量方案
+      对 BepInEx 5/6 均不可行，数据根由 preloader 位置决定）
 - [ ] 插件文件覆盖冲突检测
 - [ ] LogOutput.log 解析（错误高亮、崩溃定位）
+- [ ] cfg 结构化编辑（解析 section/entry 与类型注释，参考 r2modman ConfigUtils）
 - [ ] Thunderstore 搜索/安装集成
+
+## r2modman 调研结论（已落地/待落地）
+
+基于 `.research/r2modmanPlus` 克隆源码的详细调研（3 个子代理 + 主线程阅读）：
+
+| 结论 | 状态 |
+|---|---|
+| Profile 隔离 = BepInEx 整树进 profile + Doorstop `--doorstop-target` / `doorstop_config.ini` 指向 profile preloader；BepInEx 以 preloader 位置定位数据根，plugins/config 天然跟随 | 待落地（路线图 v2） |
+| BEPINEX_PLUGINS_PATH 环境变量对 BepInEx 5/6 均不支持 | 已确认，不走此路 |
+| ModLinker 幂等复制（size+mtime 比对）用于同步注入件 | 待落地 |
+| 安装管线：cache 解压 + manifest 记录 + `.old` 后缀启停 | 部分借鉴（我们采用目录移动启停） |
+| cfg 解析：section/entry/commentLines + `# Setting type:` 类型推断 | 待落地 |
+| zip 导入需可执行扩展名黑名单（.dll/.exe/.bat/.ps1 等）防逃逸 | 待落地（导入功能时） |

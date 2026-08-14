@@ -73,6 +73,47 @@ export interface GameScanResult {
   hasDisabledDir: boolean
 }
 
+/** Profile 档案（插件启停状态快照） */
+export interface ProfileDef {
+  id: string
+  name: string
+  createdAt: string
+  /** 插件相对路径 -> 是否启用（快照） */
+  pluginStates: Record<string, boolean>
+}
+
+/** Profile 持久化存储结构 */
+export interface ProfilesStore {
+  /** 按游戏目录（小写规范化）分组的档案 */
+  games: Record<string, { currentProfileId: string | null; profiles: ProfileDef[] }>
+}
+
+/** BepInEx GitHub release 资产 */
+export interface BepInExReleaseAsset {
+  name: string
+  url: string
+  size: number
+}
+
+/** BepInEx GitHub release */
+export interface BepInExRelease {
+  tag: string
+  prerelease: boolean
+  publishedAt: string
+  /** 匹配指定游戏类型的可下载资产 */
+  assets: BepInExReleaseAsset[]
+}
+
+/** 安装进度 */
+export interface InstallProgress {
+  phase: 'fetch' | 'download' | 'extract' | 'done' | 'error'
+  percent: number
+  message: string
+}
+
+/** Unity 运行时类型（BepInEx 变体选择） */
+export type UnityRuntime = 'mono' | 'il2cpp'
+
 /** IPC 通道常量（主进程 ipcMain.handle 与 preload 共用） */
 export const IPC = {
   /** 发现游戏列表 */
@@ -86,5 +127,19 @@ export const IPC = {
   /** 读取插件配置文件（cfg） */
   readConfigFile: 'config:read',
   /** 写入插件配置文件（cfg） */
-  writeConfigFile: 'config:write'
+  writeConfigFile: 'config:write',
+  /** 列出某游戏的档案 */
+  profilesList: 'profiles:list',
+  /** 创建档案（快照当前状态） */
+  profilesCreate: 'profiles:create',
+  /** 删除档案 */
+  profilesDelete: 'profiles:delete',
+  /** 重命名档案 */
+  profilesRename: 'profiles:rename',
+  /** 应用档案 */
+  profilesApply: 'profiles:apply',
+  /** 列出 BepInEx 可用版本 */
+  bepinexListReleases: 'bepinex:list-releases',
+  /** 安装 BepInEx */
+  bepinexInstall: 'bepinex:install'
 } as const
