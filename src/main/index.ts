@@ -14,6 +14,7 @@ import {
   removeLibraryEntry
 } from './core/library'
 import { listBepInExReleases, installBepInExToLibrary } from './core/installer'
+import { checkForUpdates } from './core/updater'
 import { readLog, LogReadResult } from './core/logparser'
 import {
   migrateToIsolated,
@@ -76,13 +77,19 @@ function resolveDataRoot(): string {
   return app.getPath('userData')
 }
 
+// 数据根必须在 app ready 之前确定并注入：
+// 1. core 层（profiles.ts / isolation.ts / installer.ts）读取 BEPINEX_MANAGER_DATA_DIR
+// 2. userData 一并指向 <dataRoot>/cache —— Chromium 缓存（Cache/GPUCache 等）也进安装目录，
+//    打包版做到"零 C 盘写入"（开发模式 dataRoot=userData，cache 在其下也无副作用）
+const dataRoot = resolveDataRoot()
+process.env.BEPINEX_MANAGER_DATA_DIR = dataRoot
+app.setPath('userData', join(dataRoot, 'cache'))
+
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.bepinexmanager.app')
 
-  // 数据根注入 core 层（profiles.ts / isolation.ts / installer.ts 均读取该环境变量）
-  process.env.BEPINEX_MANAGER_DATA_DIR = resolveDataRoot()
   try {
-    mkdirSync(process.env.BEPINEX_MANAGER_DATA_DIR, { recursive: true })
+    mkdirSync(dataRoot, { recursive: true })
   } catch {
     /* 目录创建失败由具体功能报错 */
   }
@@ -226,6 +233,9 @@ function registerIpcHandlers(): void {  // 发现游戏（Steam 库 + 手动）
   ipcMain.handle(IPC.libraryRemove, (_e, gameDir: string, relPath: string) =>
     removeLibraryEntry(gameDir, relPath)
   )
+
+  // 检查更新（GitHub Releases）
+  ipcMain.handle(IPC.updatesCheck, () => checkForUpdates())
 
   // ---- BepInEx 安装 ----
   ipcMain.handle(IPC.bepinexListReleases, (_e, runtime: 'mono' | 'il2cpp') =>

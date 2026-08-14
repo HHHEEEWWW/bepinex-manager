@@ -6,7 +6,8 @@ import type {
   LogReadResult,
   IsolatedProfileInfo,
   LibraryAddResult,
-  LibraryScanResult
+  LibraryScanResult,
+  UpdateCheckResult
 } from '../shared/types'
 import { IPC } from '../shared/types'
 
@@ -66,6 +67,10 @@ const api = {
     ipcRenderer.invoke(IPC.libraryRemove, gameDir, relPath),
   /** 从拖拽的 File 对象取真实磁盘路径（Electron 37：File.path 已移除，必须用 webUtils） */
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),
+
+  // ---- 更新 ----
+  /** 检查更新（GitHub Releases，5 分钟缓存） */
+  checkForUpdates: (): Promise<UpdateCheckResult> => ipcRenderer.invoke(IPC.updatesCheck),
 
   // ---- BepInEx 安装 ----
   listBepInExReleases: (runtime: 'mono' | 'il2cpp'): Promise<BepInExRelease[]> =>

@@ -215,6 +215,22 @@ export interface LibraryAddResult {
   failed: ModInstallItem[]
 }
 
+/** 检查更新结果 */
+export interface UpdateCheckResult {
+  /** 当前版本（app.getVersion） */
+  current: string
+  /** 最新版本号（无 v 前缀；查询失败为 null） */
+  latest: string | null
+  /** 是否有新版本 */
+  hasUpdate: boolean
+  /** Release 页面地址 */
+  url: string | null
+  /** Release 说明（body） */
+  notes: string | null
+  /** 查询失败原因（成功为 null） */
+  error: string | null
+}
+
 /** IPC 通道常量（主进程 ipcMain.handle 与 preload 共用） */
 export const IPC = {
   /** 发现游戏列表 */
@@ -264,5 +280,7 @@ export const IPC = {
   /** 从当前档案移除条目（插件库保留） */
   profileRemoveEntry: 'profile:remove-entry',
   /** 从插件库删除条目（不可恢复；档案副本不受影响） */
-  libraryRemove: 'library:remove'
+  libraryRemove: 'library:remove',
+  /** 检查更新（GitHub Releases） */
+  updatesCheck: 'updates:check'
 } as const

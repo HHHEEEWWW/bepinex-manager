@@ -12,7 +12,8 @@ import type {
   IsolatedProfileInfo,
   LibraryAddResult,
   LibraryScanResult,
-  ModInstallItem
+  ModInstallItem,
+  UpdateCheckResult
 } from '@shared/types'
 
 const { message } = createDiscreteApi(['message'], {
@@ -217,6 +218,32 @@ async function openLibraryDir(): Promise<void> {
   } catch (e) {
     message.error(String(e))
   }
+}
+
+// ---- 检查更新 ----
+const checkingUpdate = ref(false)
+const updateModal = ref<UpdateCheckResult | null>(null)
+
+async function checkUpdate(): Promise<void> {
+  checkingUpdate.value = true
+  try {
+    const res = await window.api.checkForUpdates()
+    if (res.error) {
+      message.error(`检查更新失败：${res.error}`)
+    } else if (res.hasUpdate) {
+      updateModal.value = res
+    } else {
+      message.success(`已是最新版本 v${res.current}`)
+    }
+  } catch (err) {
+    message.error(`检查更新失败：${(err as Error).message}`)
+  } finally {
+    checkingUpdate.value = false
+  }
+}
+
+function openUpdateUrl(): void {
+  if (updateModal.value?.url) window.open(updateModal.value.url, '_blank')
 }
 
 const filteredLogs = computed(() => {
@@ -630,6 +657,9 @@ function displayName(p: PluginInfo): string {
             <button v-if="selectedGame.bepinex" class="btn-plain" title="查看 BepInEx 运行日志" @click="openLogModal">
               📋 日志
             </button>
+            <button class="btn-plain" title="从 GitHub 检查新版本" :disabled="checkingUpdate" @click="checkUpdate">
+              {{ checkingUpdate ? '⏳ 检查中…' : '🔄 检查更新' }}
+            </button>
             <button v-if="!selectedGame.bepinex && selectedGame.compatible" class="btn-primary" @click="openInstallModal">
               ⬇ 安装 BepInEx
             </button>
@@ -1040,6 +1070,29 @@ function displayName(p: PluginInfo): string {
       <div class="dialog-foot">
         <span class="dim">从插件库拖入档案的插件，Steam 启动游戏即生效</span>
         <button class="btn-primary" @click="libFeedback = null">好的</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 检查更新弹窗 ============ -->
+  <div v-if="updateModal" class="mask" @click.self="updateModal = null">
+    <div class="dialog update-dialog">
+      <div class="dialog-head">
+        <span>🔄 发现新版本 v{{ updateModal.latest }}</span>
+        <button class="icon-btn" @click="updateModal = null">✕</button>
+      </div>
+      <div class="update-body">
+        <p class="dim">
+          当前版本 <b>v{{ updateModal.current }}</b> → 最新版本 <b class="up">v{{ updateModal.latest }}</b>
+        </p>
+        <div v-if="updateModal.notes" class="update-notes">
+          <div class="mod-result-title">更新说明</div>
+          <pre class="update-notes-pre">{{ updateModal.notes }}</pre>
+        </div>
+      </div>
+      <div class="dialog-foot">
+        <span class="dim">下载安装版后直接覆盖安装，数据（安装目录 data/）会保留</span>
+        <button class="btn-primary" @click="openUpdateUrl">⬇ 前往 GitHub 下载</button>
       </div>
     </div>
   </div>
@@ -1669,6 +1722,47 @@ function displayName(p: PluginInfo): string {
 }
 .trash-icon {
   font-size: 16px;
+}
+
+/* 检查更新弹窗 */
+.update-dialog {
+  max-width: 560px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+}
+.update-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 18px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 13px;
+}
+.up {
+  color: #7cb3ff;
+}
+.update-notes {
+  border: 1px solid #272c35;
+  border-radius: 10px;
+  background: #1b1f26;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.update-notes-pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #c6ccd6;
+  font-family: inherit;
+  max-height: 300px;
+  overflow-y: auto;
+  user-select: text;
 }
 
 /* MOD 安装结果弹窗 */

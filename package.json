@@ -1,6 +1,6 @@
 {
   "name": "bepinex-manager",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "跨游戏通用的 BepInEx 插件管理器（隔离模式：插件库 + 档案，安装/启停/配置/日志一键管理）",
   "main": "./out/main/index.js",
   "author": "bepinex-manager",
