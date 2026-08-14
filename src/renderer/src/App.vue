@@ -649,6 +649,13 @@ function displayName(p: PluginInfo): string {
                 >
                   ⚙ 配置
                 </button>
+                <span
+                  v-else-if="p.meta"
+                  class="cfg-pending dim"
+                  title="配置文件由插件在游戏首次运行时自动生成，运行一次游戏后即可编辑"
+                >
+                  配置未生成（运行游戏后出现）
+                </span>
                 <button
                   class="switch-btn"
                   :class="p.enabled ? 'on' : 'off'"
@@ -1285,6 +1292,12 @@ function displayName(p: PluginInfo): string {
   gap: 10px;
   flex-shrink: 0;
   align-items: center;
+}
+.cfg-pending {
+  font-size: 11.5px;
+  max-width: 150px;
+  text-align: right;
+  line-height: 1.4;
 }
 .switch-btn {
   min-width: 76px;
