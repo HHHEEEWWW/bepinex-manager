@@ -46,6 +46,8 @@ const api = {
   // ---- 档案隔离模式（插件库） ----
   isolationMigrate: (gameDir: string, gameName: string, profileName: string): Promise<{ profileId: string; target: string }> =>
     ipcRenderer.invoke(IPC.isolationMigrate, gameDir, gameName, profileName),
+  isolationCreate: (gameDir: string, gameName: string, profileName: string): Promise<{ profileId: string; target: string }> =>
+    ipcRenderer.invoke(IPC.isolationCreate, gameDir, gameName, profileName),
   isolationSwitch: (gameDir: string, gameName: string, profileId: string): Promise<{ target: string }> =>
     ipcRenderer.invoke(IPC.isolationSwitch, gameDir, gameName, profileId),
   isolationRestore: (gameDir: string, gameName: string, profileId: string): Promise<boolean> =>

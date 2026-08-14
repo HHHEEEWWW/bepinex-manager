@@ -244,6 +244,51 @@ export function migrateToIsolated(
   }
 }
 
+/**
+ * 新建隔离档案：从当前生效档案复制 BepInEx 框架（排除 plugins/config/日志缓存），
+ * 新档案从干净状态开始，可独立装插件与配置。创建后自动切换生效。
+ */
+export function createIsolatedProfile(
+  gameDir: string,
+  gameName: string,
+  profileName: string
+): { profileId: string; target: string } {
+  const cur = currentIsolatedProfile(gameDir, gameName)
+  if (!cur) throw new Error('当前不在隔离模式（或 doorstop 未指向插件库），无法创建档案')
+
+  const srcBep = join(profileDir(gameName, gameDir, cur.id), 'BepInEx')
+  if (!existsSync(join(srcBep, 'core'))) throw new Error('当前档案缺少 BepInEx 框架')
+
+  const profileId = newProfileId()
+  const destBep = join(profileDir(gameName, gameDir, profileId), 'BepInEx')
+  mkdirSync(dirname(destBep), { recursive: true })
+  cpSync(srcBep, destBep, {
+    recursive: true,
+    filter: (src) => {
+      const rel = src.replace(/\\/g, '/')
+      // 排除插件/配置/日志缓存——新档案从干净状态开始
+      const base = rel.split('/').pop() ?? ''
+      if (base === 'plugins' || base === 'config' || base === 'cache') return false
+      if (base.endsWith('.log') || base === 'LogOutput.log' || base === 'ErrorLog.log') return false
+      return true
+    }
+  })
+
+  // 确保 plugins/config 目录存在（空目录不会随 cpSync 复制）
+  mkdirSync(join(destBep, 'plugins'), { recursive: true })
+  mkdirSync(join(destBep, 'config'), { recursive: true })
+
+  writeMeta(gameName, gameDir, profileId, {
+    name: profileName,
+    gameName,
+    createdAt: new Date().toISOString()
+  })
+
+  // 创建后自动切换生效
+  const target = pointDoorstopToProfile(gameDir, destBep)
+  return { profileId, target }
+}
+
 /** 切换隔离档案：doorstop target 指向另一档案 */
 export function switchIsolatedProfile(
   gameDir: string,

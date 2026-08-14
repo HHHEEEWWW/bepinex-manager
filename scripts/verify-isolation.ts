@@ -9,6 +9,7 @@ import { detectBepInEx } from '../src/main/core/bepinex'
 import { scanPlugins } from '../src/main/core/plugins'
 import {
   migrateToIsolated,
+  createIsolatedProfile,
   switchIsolatedProfile,
   restoreFromIsolated,
   listIsolatedProfiles,
@@ -78,7 +79,30 @@ try {
   if (!cur || cur.id !== m.profileId || cur.name !== '单机档') throw new Error('当前档案识别失败')
   console.log('隔离检测/扫描/列表/当前 ✅（name=' + cur.name + '）')
 
-  console.log('\n=== 4. 第二个档案 + 切换 ===')
+  console.log('\n=== 4. 隔离模式下新建档案 ===')
+  const created = createIsolatedProfile(gameDir, GAME_NAME, '纯净档')
+  console.log('created id=' + created.profileId + ' -> ' + created.target)
+  // 新档案自动切换生效
+  const curAfterCreate = currentIsolatedProfile(gameDir, GAME_NAME)
+  if (!curAfterCreate || curAfterCreate.id !== created.profileId) {
+    throw new Error('新建后未自动切换: ' + JSON.stringify(curAfterCreate))
+  }
+  // 新档案：框架在、插件/配置为空
+  const newBep = join(profileDir(GAME_NAME, gameDir, created.profileId), 'BepInEx')
+  if (!existsSync(join(newBep, 'core', 'BepInEx.Unity.IL2CPP.dll'))) {
+    throw new Error('新档案缺少框架 core')
+  }
+  if (existsSync(join(newBep, 'plugins', 'FakeMod.dll'))) {
+    throw new Error('新档案不应复制插件')
+  }
+  if (existsSync(join(newBep, 'config', 'com.fake.mod.cfg'))) {
+    throw new Error('新档案不应复制配置')
+  }
+  const list2 = listIsolatedProfiles(gameDir, GAME_NAME)
+  if (list2.length !== 2) throw new Error('档案列表应为 2: ' + JSON.stringify(list2))
+  console.log('新建档案 ✅（框架复制、插件/配置为空、自动切换）')
+
+  console.log('\n=== 5. 第二个档案 + 切换 ===')
   const id2 = 'p' + Date.now().toString(36) + 'xyz'
   cpSync(profileDir(GAME_NAME, gameDir, m.profileId), profileDir(GAME_NAME, gameDir, id2), {
     recursive: true

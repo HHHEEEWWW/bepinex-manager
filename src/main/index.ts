@@ -11,6 +11,7 @@ import { listBepInExReleases, installBepInExToLibrary } from './core/installer'
 import { readLog, LogReadResult } from './core/logparser'
 import {
   migrateToIsolated,
+  createIsolatedProfile,
   switchIsolatedProfile,
   restoreFromIsolated,
   listIsolatedProfiles,
@@ -192,6 +193,13 @@ function registerIpcHandlers(): void {  // 发现游戏（Steam 库 + 手动）
       throw new Error('档案名只能包含中文/字母/数字/空格/连字符，长度 1-40')
     }
     return migrateToIsolated(gameDir, gameName, profileName)
+  })
+
+  ipcMain.handle(IPC.isolationCreate, (_e, gameDir: string, gameName: string, profileName: string) => {
+    if (!/^[\w\u4e00-\u9fa5 -]{1,40}$/.test(profileName)) {
+      throw new Error('档案名只能包含中文/字母/数字/空格/连字符，长度 1-40')
+    }
+    return createIsolatedProfile(gameDir, gameName, profileName)
   })
 
   ipcMain.handle(IPC.isolationSwitch, (_e, gameDir: string, gameName: string, profileId: string) =>

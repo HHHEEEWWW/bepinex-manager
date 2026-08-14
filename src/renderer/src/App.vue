@@ -54,7 +54,13 @@ let logTimer: ReturnType<typeof setInterval> | null = null
 // ---- 档案隔离模式 ----
 const isolatedList = ref<IsolatedProfileInfo[]>([])
 const isolatedCurrent = ref<IsolatedProfileInfo | null>(null)
-const isolateModal = ref<{ show: boolean; name: string; busy: boolean; error: string } | null>(null)
+const isolateModal = ref<{
+  show: boolean
+  mode: 'migrate' | 'create'
+  name: string
+  busy: boolean
+  error: string
+} | null>(null)
 
 const filteredLogs = computed(() => {
   if (!logData.value) return []
@@ -139,10 +145,15 @@ async function doMigrate(): Promise<void> {
   m.busy = true
   m.error = ''
   try {
-    await window.api.isolationMigrate(selectedGame.value.gameDir, selectedGame.value.name, m.name.trim())
+    if (m.mode === 'create') {
+      await window.api.isolationCreate(selectedGame.value.gameDir, selectedGame.value.name, m.name.trim())
+      message.success(`已创建并切换到档案「${m.name.trim()}」（干净插件/配置）`)
+    } else {
+      await window.api.isolationMigrate(selectedGame.value.gameDir, selectedGame.value.name, m.name.trim())
+      message.success('已迁入插件库，BepInEx 整树已移到管理器目录')
+    }
     m.busy = false
     m.show = false
-    message.success('已迁入插件库，BepInEx 整树已移到管理器目录')
     await refreshGames()
   } catch (e) {
     m.busy = false
@@ -498,8 +509,8 @@ function displayName(p: PluginInfo): string {
             <button
               v-if="selectedGame.bepinex && !selectedGame.bepinex.isIsolated"
               class="btn-plain"
-              title="把 BepInEx 迁入档案目录，支持多档案独立配置与插件组合"
-              @click="isolateModal = { show: true, name: '', busy: false, error: '' }"
+              title="把 BepInEx 迁入插件库目录，支持多档案独立配置与插件组合"
+              @click="isolateModal = { show: true, mode: 'migrate', name: '', busy: false, error: '' }"
             >
               📦 启用档案隔离
             </button>
@@ -563,6 +574,13 @@ function displayName(p: PluginInfo): string {
                 </button>
               </template>
               <span v-else class="dim">暂无档案</span>
+              <button
+                class="btn-plain iso-new-btn"
+                title="新建档案：从当前档案复制 BepInEx 框架（插件/配置为空），创建后自动切换"
+                @click="isolateModal = { show: true, mode: 'create', name: '', busy: false, error: '' }"
+              >
+                ＋ 新建档案
+              </button>
               <span class="dim iso-tip">隔离模式下每个档案拥有独立的插件与配置</span>
             </template>
             <template v-else>
@@ -760,16 +778,20 @@ function displayName(p: PluginInfo): string {
     </div>
   </div>
 
-  <!-- ============ 档案隔离迁移弹窗 ============ -->
+  <!-- ============ 档案隔离迁移/新建弹窗 ============ -->
   <div v-if="isolateModal?.show" class="mask" @click.self="isolateModal.show = false">
     <div class="dialog small-dialog">
       <div class="dialog-head">
-        <span>📦 启用档案隔离模式</span>
+        <span>{{ isolateModal.mode === 'create' ? '➕ 新建档案' : '📦 启用档案隔离' }}</span>
         <button class="icon-btn" @click="isolateModal.show = false">✕</button>
       </div>
       <div class="isolate-body">
-        <p class="dim">
-          BepInEx 整树将迁移到管理器数据目录，游戏根目录只保留注入件（winhttp.dll 等）。
+        <p v-if="isolateModal.mode === 'create'" class="dim">
+          从当前档案复制 BepInEx 框架（<b>插件与配置为空</b>），创建后自动切换生效。
+          新档案可独立安装插件、独立配置，互不干扰。
+        </p>
+        <p v-else class="dim">
+          BepInEx 整树将迁移到插件库（管理器目录），游戏根目录只保留注入件（winhttp.dll 等）。
           之后可为不同场景创建多个档案，每个档案拥有<b>独立的插件组合与配置</b>，一键切换。
         </p>
         <input
@@ -781,13 +803,13 @@ function displayName(p: PluginInfo): string {
         <span v-if="isolateModal.error" class="error-text">{{ isolateModal.error }}</span>
       </div>
       <div class="dialog-foot">
-        <span class="dim">迁移不删除任何文件，随时可还原</span>
+        <span class="dim">{{ isolateModal.mode === 'create' ? '不复制现有插件与配置' : '迁移不删除任何文件，随时可还原' }}</span>
         <button
           class="btn-primary"
           :disabled="isolateModal.busy || !isolateModal.name.trim()"
           @click="doMigrate"
         >
-          {{ isolateModal.busy ? '迁移中…' : '开始迁移' }}
+          {{ isolateModal.busy ? '处理中…' : isolateModal.mode === 'create' ? '创建档案' : '开始迁移' }}
         </button>
       </div>
     </div>

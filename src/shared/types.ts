@@ -210,6 +210,8 @@ export const IPC = {
   logsResetOffset: 'logs:reset-offset',
   /** 迁移到档案隔离模式 */
   isolationMigrate: 'isolation:migrate',
+  /** 隔离模式下新建档案（复制框架，干净插件/配置） */
+  isolationCreate: 'isolation:create',
   /** 切换隔离档案（改 doorstop target） */
   isolationSwitch: 'isolation:switch',
   /** 从隔离模式还原到游戏目录 */
