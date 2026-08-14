@@ -1,6 +1,6 @@
 import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join, dirname } from 'path'
-import { readFileSync, writeFileSync, statSync, mkdirSync, existsSync } from 'fs'
+import { readFileSync, writeFileSync, statSync, mkdirSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { IPC } from '@shared/types'
 import { discoverGames, addManualGame } from './core/games'
