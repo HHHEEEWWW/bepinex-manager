@@ -1,0 +1,46 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --bg: #16181d;
+  --bg-panel: #1e2128;
+  --bg-hover: #262a33;
+  --border: #31363f;
+  --text: #e6e8ec;
+  --text-dim: #9aa3af;
+  --accent: #4c9aff;
+  --accent-dim: #2f6bb3;
+  --green: #3fb96a;
+  --red: #e05d5d;
+  --mono: Consolas, 'Courier New', monospace;
+}
+
+body {
+  font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  user-select: none;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}

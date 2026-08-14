@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "dgSpecHash": "gXNzIjLRXso=",
+  "success": true,
+  "projectFilePath": "E:\\deepseekharness\\BeplnEx-mod-workplace\\bepinex-manager\\tools\\plugin-metadata-reader\\plugin-metadata-reader.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\59263\\.nuget\\packages\\system.reflection.metadataloadcontext\\9.0.0\\system.reflection.metadataloadcontext.9.0.0.nupkg.sha512"
+  ],
+  "logs": []
+}

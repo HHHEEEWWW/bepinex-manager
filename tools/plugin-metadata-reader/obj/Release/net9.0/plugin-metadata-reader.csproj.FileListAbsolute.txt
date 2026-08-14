@@ -1,0 +1,17 @@
+E:\deepseekharness\BeplnEx-mod-workplace\bepinex-manager\tools\plugin-metadata-reader\bin\Release\net9.0\plugin-metadata-reader.exe
+E:\deepseekharness\BeplnEx-mod-workplace\bepinex-manager\tools\plugin-metadata-reader\bin\Release\net9.0\plugin-metadata-reader.deps.json
+E:\deepseekharness\BeplnEx-mod-workplace\bepinex-manager\tools\plugin-metadata-reader\bin\Release\net9.0\plugin-metadata-reader.runtimeconfig.json
+E:\deepseekharness\BeplnEx-mod-workplace\bepinex-manager\tools\plugin-metadata-reader\bin\Release\net9.0\plugin-metadata-reader.dll
+E:\deepseekharness\BeplnEx-mod-workplace\bepinex-manager\tools\plugin-metadata-reader\bin\Release\net9.0\plugin-metadata-reader.pdb
+E:\deepseekharness\BeplnEx-mod-workplace\bepinex-manager\tools\plugin-metadata-reader\bin\Release\net9.0\System.Reflection.MetadataLoadContext.dll
+E:\deepseekharness\BeplnEx-mod-workplace\bepinex-manager\tools\plugin-metadata-reader\obj\Release\net9.0\plugin-metadata-reader.csproj.AssemblyReference.cache
+E:\deepseekharness\BeplnEx-mod-workplace\bepinex-manager\tools\plugin-metadata-reader\obj\Release\net9.0\plugin-metadata-reader.GeneratedMSBuildEditorConfig.editorconfig
+E:\deepseekharness\BeplnEx-mod-workplace\bepinex-manager\tools\plugin-metadata-reader\obj\Release\net9.0\plugin-metadata-reader.AssemblyInfoInputs.cache
+E:\deepseekharness\BeplnEx-mod-workplace\bepinex-manager\tools\plugin-metadata-reader\obj\Release\net9.0\plugin-metadata-reader.AssemblyInfo.cs
+E:\deepseekharness\BeplnEx-mod-workplace\bepinex-manager\tools\plugin-metadata-reader\obj\Release\net9.0\plugin-metadata-reader.csproj.CoreCompileInputs.cache
+E:\deepseekharness\BeplnEx-mod-workplace\bepinex-manager\tools\plugin-metadata-reader\obj\Release\net9.0\plugin-m.8D4394A2.Up2Date
+E:\deepseekharness\BeplnEx-mod-workplace\bepinex-manager\tools\plugin-metadata-reader\obj\Release\net9.0\plugin-metadata-reader.dll
+E:\deepseekharness\BeplnEx-mod-workplace\bepinex-manager\tools\plugin-metadata-reader\obj\Release\net9.0\refint\plugin-metadata-reader.dll
+E:\deepseekharness\BeplnEx-mod-workplace\bepinex-manager\tools\plugin-metadata-reader\obj\Release\net9.0\plugin-metadata-reader.pdb
+E:\deepseekharness\BeplnEx-mod-workplace\bepinex-manager\tools\plugin-metadata-reader\obj\Release\net9.0\plugin-metadata-reader.genruntimeconfig.cache
+E:\deepseekharness\BeplnEx-mod-workplace\bepinex-manager\tools\plugin-metadata-reader\obj\Release\net9.0\ref\plugin-metadata-reader.dll
