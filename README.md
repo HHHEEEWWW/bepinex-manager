@@ -8,16 +8,20 @@
 ## 功能
 
 - ✅ **游戏发现**：自动扫描 Steam 库（解析 `libraryfolders.vdf` + `appmanifest_*.acf`），支持手动添加游戏目录
-- ✅ **BepInEx 检测**：区分 BepInEx 5（Mono）/ 6（IL2CPP），从 LogOutput.log 提取版本号
+- ✅ **BepInEx 检测**：区分 BepInEx 5（Mono）/ 6（IL2CPP），从 LogOutput.log 提取版本号；支持隔离模式自动识别
 - ✅ **插件扫描**：递归扫描 `BepInEx/plugins`（含禁用目录），显示名称、GUID、版本、大小
 - ✅ **元数据解析**：C# 辅助工具（MetadataLoadContext 只读反射，不执行插件代码）批量提取
   `BepInPlugin` / `BepInDependency` 特性 → GUID、名称、版本、依赖清单
 - ✅ **启用/禁用**：dll 在 `plugins` ↔ `plugins-disabled` 之间移动（跨 BepInEx 5/6 兼容，不污染游戏文件）
 - ✅ **依赖检查**：自动标出缺失依赖的插件
-- ✅ **配置编辑**：读取/编辑 `BepInEx/config/<GUID>.cfg`（BepInEx 配置，重启游戏生效）
-- ✅ **Profile 档案系统**：保存/应用插件启停状态快照（应用失败自动回滚，不触碰 BepInEx 框架本体）
+- ✅ **冲突检测**：GUID 重复（BepInEx 只加载一个）+ 跨目录同名 dll 检测，卡片红色徽章提示
+- ✅ **配置编辑**：cfg **结构化表单**（Boolean 开关 / 枚举下拉 / 数值输入，类型从 `# Setting type` 注释推断）+ 文本模式切换
+- ✅ **Profile 档案 v1**：保存/应用插件启停状态快照（应用失败自动回滚）
+- ✅ **Profile 隔离 v2**：BepInEx 整树迁移到档案目录，doorstop_config.ini 指向档案 preloader，
+  从 Steam 直接启动生效，多档案独立插件与配置一键切换，支持还原（Doorstop v3/v4 兼容）
+- ✅ **日志解析**：LogOutput.log 增量读取，错误/警告高亮、堆栈合并、按来源统计崩溃定位
 - ✅ **BepInEx 一键安装**：从 GitHub 官方 release 下载（BepInEx 5 稳定版 + 6.x pre），按 Mono/IL2CPP
-  自动过滤资产，进度条 + 24h 本地缓存（API 限流时回退缓存）
+  自动过滤资产，进度条 + 24h 本地缓存 + 网页回退（releases.atom + expanded_assets，不受 API 限流）
 
 ## 技术栈
 
@@ -86,15 +90,13 @@ BepInEx 只加载 `BepInEx/plugins/` 下的 dll。本项目将禁用的插件移
 
 ## 路线图
 
-- [ ] 打包分发（electron-builder NSIS）
-- [ ] **Profile 隔离模式（v2）**：参考 r2modman 的 Doorstop 方案，BepInEx 整树常驻独立目录，
-      游戏根目录只留 winhttp.dll + doorstop_config.ini（target 指向 profile 的 preloader），
-      从 Steam 直接启动即可生效，切换 profile 零搬移（调研结论：BEPINEX_PLUGINS_PATH 环境变量方案
-      对 BepInEx 5/6 均不可行，数据根由 preloader 位置决定）
-- [ ] 插件文件覆盖冲突检测
-- [ ] LogOutput.log 解析（错误高亮、崩溃定位）
-- [ ] cfg 结构化编辑（解析 section/entry 与类型注释，参考 r2modman ConfigUtils）
-- [ ] Thunderstore 搜索/安装集成
+- [ ] 打包分发（electron-builder NSIS）—— P0-P1 全部完成后的收尾项
+- [x] **Profile 隔离模式（v2）**：Doorstop 方案已落地（`src/main/core/isolation.ts`），
+      迁移/切换/还原 + 验证脚本 `scripts/verify-isolation.ts`
+- [x] 插件文件覆盖/重复冲突检测（GUID + 同名文件）
+- [x] LogOutput.log 解析（错误高亮、崩溃定位、增量读取）
+- [x] cfg 结构化编辑（`src/shared/cfgparser.ts`，类型推断 + 表单/文本双视图）
+- [ ] Thunderstore 搜索/安装集成（生态集成，最后阶段）
 
 ## r2modman 调研结论（已落地/待落地）
 
@@ -102,9 +104,9 @@ BepInEx 只加载 `BepInEx/plugins/` 下的 dll。本项目将禁用的插件移
 
 | 结论 | 状态 |
 |---|---|
-| Profile 隔离 = BepInEx 整树进 profile + Doorstop `--doorstop-target` / `doorstop_config.ini` 指向 profile preloader；BepInEx 以 preloader 位置定位数据根，plugins/config 天然跟随 | 待落地（路线图 v2） |
+| Profile 隔离 = BepInEx 整树进 profile + doorstop_config.ini 指向 profile preloader；BepInEx 以 preloader 位置定位数据根，plugins/config 天然跟随 | ✅ 已落地（isolation.ts） |
 | BEPINEX_PLUGINS_PATH 环境变量对 BepInEx 5/6 均不支持 | 已确认，不走此路 |
-| ModLinker 幂等复制（size+mtime 比对）用于同步注入件 | 待落地 |
+| ModLinker 幂等复制（size+mtime 比对）用于同步注入件 | 待落地（迁移已用 cpSync 全量复制，可优化） |
 | 安装管线：cache 解压 + manifest 记录 + `.old` 后缀启停 | 部分借鉴（我们采用目录移动启停） |
-| cfg 解析：section/entry/commentLines + `# Setting type:` 类型推断 | 待落地 |
+| cfg 解析：section/entry/commentLines + `# Setting type:` 类型推断 | ✅ 已落地（shared/cfgparser.ts） |
 | zip 导入需可执行扩展名黑名单（.dll/.exe/.bat/.ps1 等）防逃逸 | 待落地（导入功能时） |
