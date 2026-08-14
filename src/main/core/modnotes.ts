@@ -18,7 +18,7 @@ const BUILTIN_NOTES: Record<string, string> = {
     '【快捷键】Ctrl+1 时间2x · Ctrl+2 时间5x · Ctrl+3 时间10x · Ctrl+4 时间1x\n' +
     'Ctrl+5 完成所有研究 · Ctrl+6 自动保存 · Ctrl+7 God Mode · Ctrl+8 Daddy Mode\n' +
     'Ctrl+9 免费制造开 · Ctrl+0 智能自动分配\n' +
-    '【配置】机器人强化数值、自动分配间隔、面板布局均可配置（本管理器「⚙ 配置」表单化编辑）。'
+    '【配置】自动分配间隔、面板布局均可配置（本管理器「⚙ 配置」表单化编辑）。'
 }
 
 /** 获取插件说明（自定义文件优先，其次内置） */
