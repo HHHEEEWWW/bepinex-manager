@@ -447,7 +447,7 @@ function displayName(p: PluginInfo): string {
               {{ selectedGame.bepinex.isMono ? '· Mono' : '· IL2CPP' }}
             </span>
             <span v-if="selectedGame.bepinex?.isIsolated" class="pill pill-isolated">🔒 档案隔离</span>
-            <span v-else class="pill pill-warn">未检测到 BepInEx</span>
+            <span v-if="!selectedGame.bepinex" class="pill pill-warn">未检测到 BepInEx</span>
             <button
               v-if="selectedGame.bepinex && !selectedGame.bepinex.isIsolated"
               class="btn-plain"
