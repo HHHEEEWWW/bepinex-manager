@@ -10,9 +10,9 @@ import type { BepInExInfo } from '@shared/types'
 
 /** 检测一个游戏目录的 BepInEx 安装（常规或隔离模式） */
 export function detectBepInEx(gameDir: string): BepInExInfo | null {
-  // 1) 常规模式：gameDir/BepInEx 存在
+  // 1) 常规模式：gameDir/BepInEx 存在且完整（core 缺失视为残留/半成品，不误判）
   const bepinexDir = join(gameDir, 'BepInEx')
-  if (existsSync(bepinexDir)) {
+  if (existsSync(bepinexDir) && existsSync(join(bepinexDir, 'core'))) {
     return buildInfo(gameDir, bepinexDir, false)
   }
 
