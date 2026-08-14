@@ -16,10 +16,19 @@ import { getModNote } from './modnotes'
 
 export const DISABLED_DIR_NAME = 'plugins-disabled'
 
+/**
+ * 禁用目录位置：与 pluginsDir 同根（跟随 BepInEx 数据根）。
+ * 常规模式 = <游戏目录>/BepInEx/plugins-disabled；
+ * 隔离模式 = <插件库档案>/BepInEx/plugins-disabled（与 plugins 同盘，避免跨盘 rename）。
+ */
+export function disabledDirOf(bepinex: BepInExInfo): string {
+  return join(bepinex.rootDir, DISABLED_DIR_NAME)
+}
+
 /** 扫描一个游戏的插件列表（启用 + 禁用合并） */
 export function scanPlugins(bepinex: BepInExInfo): GameScanResult {
   const pluginsDir = bepinex.pluginsDir
-  const disabledDir = join(bepinex.gameDir, 'BepInEx', DISABLED_DIR_NAME)
+  const disabledDir = disabledDirOf(bepinex)
 
   const enabled: PluginInfo[] = collectDlls(pluginsDir, pluginsDir, true)
   const disabled: PluginInfo[] = collectDlls(disabledDir, disabledDir, false)
@@ -108,7 +117,7 @@ export function detectConflicts(plugins: PluginInfo[]): PluginConflict[] {
 /** 启用/禁用插件。返回新状态。 */
 export function setPluginEnabled(bepinex: BepInExInfo, pluginId: string, enabled: boolean): boolean {
   const pluginsDir = bepinex.pluginsDir
-  const disabledDir = join(bepinex.gameDir, 'BepInEx', DISABLED_DIR_NAME)
+  const disabledDir = disabledDirOf(bepinex)
 
   const srcDir = enabled ? disabledDir : pluginsDir
   const dstDir = enabled ? pluginsDir : disabledDir
