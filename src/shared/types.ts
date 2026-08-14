@@ -25,12 +25,16 @@ export interface BepInExInfo {
   majorVersion: 5 | 6 | 'unknown'
   /** true = Mono 游戏（BepInEx 5）；false = IL2CPP（BepInEx 6） */
   isMono: boolean
+  /** BepInEx 数据根目录（常规 = gameDir/BepInEx；隔离模式 = 档案目录） */
+  rootDir: string
+  /** 是否处于隔离模式（BepInEx 整树在档案目录，游戏目录只有注入件） */
+  isIsolated: boolean
   coreDir: string
   pluginsDir: string
   configDir: string
-  /** BepInEx/LogOutput.log（存在时） */
+  /** LogOutput.log（隔离模式下在档案目录） */
   logFile: string | null
-  /** 从 LogOutput.log 提取的版本字符串，如 "5.4.23.2"，取不到为 null */
+  /** 从日志提取的版本字符串，如 "5.4.23.2"，取不到为 null */
   version: string | null
 }
 
@@ -188,5 +192,15 @@ export const IPC = {
   /** 读取日志增量（自上次读取以来） */
   logsTail: 'logs:tail',
   /** 重置日志读取偏移 */
-  logsResetOffset: 'logs:reset-offset'
+  logsResetOffset: 'logs:reset-offset',
+  /** 迁移到档案隔离模式 */
+  isolationMigrate: 'isolation:migrate',
+  /** 切换隔离档案（改 doorstop target） */
+  isolationSwitch: 'isolation:switch',
+  /** 从隔离模式还原到游戏目录 */
+  isolationRestore: 'isolation:restore',
+  /** 列出隔离档案 */
+  isolationList: 'isolation:list',
+  /** 当前生效的隔离档案 */
+  isolationCurrent: 'isolation:current'
 } as const

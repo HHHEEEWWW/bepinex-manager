@@ -14,12 +14,17 @@ import { join, dirname } from 'path'
 import type { BepInExInfo, ProfileDef, ProfilesStore } from '@shared/types'
 import { scanPlugins, setPluginEnabled } from './plugins'
 
-/** Profile 数据文件路径（可被环境变量覆盖，独立验证用） */
-export function profilesFilePath(): string {
-  const dir =
+/** 管理器数据根目录（可被环境变量覆盖，独立验证用） */
+export function dataRootDir(): string {
+  return (
     process.env.BEPINEX_MANAGER_DATA_DIR ||
     join(process.env.APPDATA ?? process.env.HOME ?? '.', 'bepinex-manager')
-  return join(dir, 'profiles.json')
+  )
+}
+
+/** Profile 数据文件路径（可被环境变量覆盖，独立验证用） */
+export function profilesFilePath(): string {
+  return join(dataRootDir(), 'profiles.json')
 }
 
 const emptyStore = (): ProfilesStore => ({ games: {} })

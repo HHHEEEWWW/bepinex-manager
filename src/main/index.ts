@@ -9,6 +9,13 @@ import { scanPlugins, setPluginEnabled } from './core/plugins'
 import { listProfiles, createProfile, deleteProfile, renameProfile, applyProfile } from './core/profiles'
 import { listBepInExReleases, installBepInEx, bepinexAlreadyInstalled } from './core/installer'
 import { readLog, LogReadResult } from './core/logparser'
+import {
+  migrateToIsolated,
+  switchIsolatedProfile,
+  restoreFromIsolated,
+  listIsolatedProfiles,
+  currentIsolatedProfile
+} from './core/isolation'
 
 /** 每个游戏的日志读取偏移缓存（gameDir -> 字节偏移） */
 const logOffsets = new Map<string, number>()
@@ -154,6 +161,27 @@ function registerIpcHandlers(): void {  // 发现游戏（Steam 库 + 手动）
     logOffsets.delete(gameDir.toLowerCase())
     return true
   })
+
+  // ---- 档案隔离模式 ----
+  ipcMain.handle(IPC.isolationMigrate, (_e, gameDir: string, profileName: string) => {
+    if (!/^[\w\u4e00-\u9fa5 -]{1,40}$/.test(profileName)) {
+      throw new Error('档案名只能包含中文/字母/数字/空格/连字符，长度 1-40')
+    }
+    return migrateToIsolated(gameDir, profileName)
+  })
+
+  ipcMain.handle(IPC.isolationSwitch, (_e, gameDir: string, profileName: string) =>
+    switchIsolatedProfile(gameDir, profileName)
+  )
+
+  ipcMain.handle(IPC.isolationRestore, (_e, gameDir: string, profileName: string) => {
+    restoreFromIsolated(gameDir, profileName)
+    return true
+  })
+
+  ipcMain.handle(IPC.isolationList, (_e, gameDir: string) => listIsolatedProfiles(gameDir))
+
+  ipcMain.handle(IPC.isolationCurrent, (_e, gameDir: string) => currentIsolatedProfile(gameDir))
 
   // ---- BepInEx 安装 ----
   ipcMain.handle(IPC.bepinexListReleases, (_e, runtime: 'mono' | 'il2cpp') =>

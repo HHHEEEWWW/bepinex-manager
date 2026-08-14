@@ -1,45 +1,76 @@
 /**
  * BepInEx 安装检测
- * 支持 BepInEx 5.x（Mono 游戏）与 BepInEx 6.x（IL2CPP 游戏）
+ * 支持 BepInEx 5.x（Mono 游戏）与 BepInEx 6.x（IL2CPP 游戏），
+ * 以及"隔离模式"：BepInEx 整树在档案目录，游戏目录只有注入件
+ * （winhttp.dll + doorstop_config.ini，target 指向档案内 preloader）。
  */
 import { existsSync, readdirSync, readFileSync } from 'fs'
-import { join } from 'path'
+import { join, dirname } from 'path'
 import type { BepInExInfo } from '@shared/types'
 
-/** 检测一个游戏目录是否安装了 BepInEx，返回检测信息 */
+/** 检测一个游戏目录的 BepInEx 安装（常规或隔离模式） */
 export function detectBepInEx(gameDir: string): BepInExInfo | null {
+  // 1) 常规模式：gameDir/BepInEx 存在
   const bepinexDir = join(gameDir, 'BepInEx')
-  if (!existsSync(bepinexDir)) return null
-
-  const coreDir = join(bepinexDir, 'core')
-  const pluginsDir = join(bepinexDir, 'plugins')
-  const configDir = join(bepinexDir, 'config')
-  const logFile = join(bepinexDir, 'LogOutput.log')
-
-  // 6.x：启动时生成 interop 目录（Il2CppInterop 互操作程序集）
-  const hasInterop = existsSync(join(bepinexDir, 'interop'))
-  // 5.x：core/BepInEx.dll
-  const hasCore5 = existsSync(join(coreDir, 'BepInEx.dll'))
-  // 6.x：core/BepInEx.Core.dll
-  const hasCore6 = existsSync(join(coreDir, 'BepInEx.Core.dll'))
-
-  if (!hasCore5 && !hasCore6 && !hasInterop) {
-    // 有 BepInEx 目录但核心缺失 → 视为未完整安装
-    return null
+  if (existsSync(bepinexDir)) {
+    return buildInfo(gameDir, bepinexDir, false)
   }
 
+  // 2) 隔离模式：winhttp.dll + doorstop_config.ini 存在，target 指向档案目录
+  if (existsSync(join(gameDir, 'winhttp.dll')) && existsSync(join(gameDir, 'doorstop_config.ini'))) {
+    const target = readDoorstopTarget(join(gameDir, 'doorstop_config.ini'))
+    if (target) {
+      // target 形如 <档案>/BepInEx/core/BepInEx.Unity.IL2CPP.dll
+      const coreDir = dirname(target)
+      const rootDir = dirname(coreDir)
+      if (
+        existsSync(join(coreDir, 'BepInEx.dll')) ||
+        existsSync(join(coreDir, 'BepInEx.Core.dll')) ||
+        existsSync(join(rootDir, 'interop'))
+      ) {
+        return buildInfo(gameDir, rootDir, true)
+      }
+    }
+  }
+  return null
+}
+
+/** 构造 BepInExInfo（rootDir = BepInEx 数据根） */
+function buildInfo(gameDir: string, rootDir: string, isIsolated: boolean): BepInExInfo {
+  const coreDir = join(rootDir, 'core')
+  const hasInterop = existsSync(join(rootDir, 'interop'))
+  const hasCore5 = existsSync(join(coreDir, 'BepInEx.dll'))
+  const hasCore6 = existsSync(join(coreDir, 'BepInEx.Core.dll'))
   const isMono = hasCore5 || (!hasInterop && !hasCore6)
-  const majorVersion = hasInterop || hasCore6 ? 6 : 5
+  const logFile = join(rootDir, 'LogOutput.log')
 
   return {
     gameDir,
-    majorVersion: isMono ? majorVersion : (6 as const),
+    majorVersion: isMono ? (5 as const) : (6 as const),
     isMono,
+    rootDir,
+    isIsolated,
     coreDir,
-    pluginsDir,
-    configDir,
+    pluginsDir: join(rootDir, 'plugins'),
+    configDir: join(rootDir, 'config'),
     logFile: existsSync(logFile) ? logFile : null,
     version: readVersionFromLog(logFile)
+  }
+}
+
+/** 从 doorstop_config.ini 读取 target（preloader 路径），兼容 v3/v4 */
+export function readDoorstopTarget(iniPath: string): string | null {
+  try {
+    const text = readFileSync(iniPath, 'utf8')
+    // v3: [UnityDoorstop] targetAssembly=...  v4: [General] target_assembly=...
+    const m = text.match(/^\s*target(?:_assembly|Assembly)\s*=\s*([^\r\n]+)/im)
+    if (!m) return null
+    const raw = m[1].trim()
+    if (raw === '') return null
+    // 相对路径（如 BepInEx\core\...）基于 ini 所在目录解析
+    return /^[a-zA-Z]:[\\/]/.test(raw) ? raw : join(dirname(iniPath), raw.replace(/\//g, '\\'))
+  } catch {
+    return null
   }
 }
 

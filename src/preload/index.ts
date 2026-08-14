@@ -42,6 +42,18 @@ const api = {
   resetLogOffset: (gameDir: string): Promise<boolean> =>
     ipcRenderer.invoke(IPC.logsResetOffset, gameDir),
 
+  // ---- 档案隔离模式 ----
+  isolationMigrate: (gameDir: string, profileName: string): Promise<{ target: string }> =>
+    ipcRenderer.invoke(IPC.isolationMigrate, gameDir, profileName),
+  isolationSwitch: (gameDir: string, profileName: string): Promise<{ target: string }> =>
+    ipcRenderer.invoke(IPC.isolationSwitch, gameDir, profileName),
+  isolationRestore: (gameDir: string, profileName: string): Promise<boolean> =>
+    ipcRenderer.invoke(IPC.isolationRestore, gameDir, profileName),
+  isolationList: (gameDir: string): Promise<string[]> =>
+    ipcRenderer.invoke(IPC.isolationList, gameDir),
+  isolationCurrent: (gameDir: string): Promise<string | null> =>
+    ipcRenderer.invoke(IPC.isolationCurrent, gameDir),
+
   // ---- BepInEx 安装 ----
   listBepInExReleases: (runtime: 'mono' | 'il2cpp'): Promise<BepInExRelease[]> =>
     ipcRenderer.invoke(IPC.bepinexListReleases, runtime),

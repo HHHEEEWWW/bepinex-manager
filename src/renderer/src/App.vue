@@ -50,6 +50,11 @@ const logData = ref<LogReadResult | null>(null)
 const logFilter = ref<'all' | 'error' | 'warn'>('all')
 let logTimer: ReturnType<typeof setInterval> | null = null
 
+// ---- 档案隔离模式 ----
+const isolatedList = ref<string[]>([])
+const isolatedCurrent = ref<string | null>(null)
+const isolateModal = ref<{ show: boolean; name: string; busy: boolean; error: string } | null>(null)
+
 const filteredLogs = computed(() => {
   if (!logData.value) return []
   if (logFilter.value === 'all') return logData.value.entries
@@ -99,6 +104,8 @@ async function selectGame(g: GameEntry): Promise<void> {
   selectedGame.value = g
   scan.value = null
   profiles.value = []
+  isolatedList.value = []
+  isolatedCurrent.value = null
   loading.value = true
   // 无 BepInEx：显示安装引导
   if (!g.bepinex) {
@@ -108,10 +115,56 @@ async function selectGame(g: GameEntry): Promise<void> {
   try {
     scan.value = await window.api.scanGame(g.gameDir)
     profiles.value = await window.api.listProfiles(g.gameDir)
+    if (g.bepinex.isIsolated) {
+      isolatedList.value = await window.api.isolationList(g.gameDir)
+      isolatedCurrent.value = await window.api.isolationCurrent(g.gameDir)
+    }
   } catch (e) {
     message.error(String(e))
   } finally {
     loading.value = false
+  }
+}
+
+// ---- 档案隔离操作 ----
+async function doMigrate(): Promise<void> {
+  if (!selectedGame.value || !isolateModal.value) return
+  const m = isolateModal.value
+  m.busy = true
+  m.error = ''
+  try {
+    await window.api.isolationMigrate(selectedGame.value.gameDir, m.name.trim())
+    m.busy = false
+    m.show = false
+    message.success('已启用档案隔离模式，BepInEx 已迁入档案目录')
+    await refreshGames()
+  } catch (e) {
+    m.busy = false
+    m.error = String(e)
+  }
+}
+
+async function doSwitchIsolated(name: string): Promise<void> {
+  if (!selectedGame.value) return
+  try {
+    await window.api.isolationSwitch(selectedGame.value.gameDir, name)
+    message.success(`已切换到档案「${name}」，下次启动游戏生效`)
+    isolatedCurrent.value = name
+    scan.value = await window.api.scanGame(selectedGame.value.gameDir)
+  } catch (e) {
+    message.error(String(e))
+  }
+}
+
+async function doRestore(): Promise<void> {
+  if (!selectedGame.value || !isolatedCurrent.value) return
+  if (!confirm(`将档案「${isolatedCurrent.value}」还原为常规模式？（BepInEx 复制回游戏目录，档案保留）`)) return
+  try {
+    await window.api.isolationRestore(selectedGame.value.gameDir, isolatedCurrent.value)
+    message.success('已还原到游戏目录')
+    await refreshGames()
+  } catch (e) {
+    message.error(String(e))
   }
 }
 
@@ -391,7 +444,24 @@ function displayName(p: PluginInfo): string {
               BepInEx {{ selectedGame.bepinex.version ?? selectedGame.bepinex.majorVersion }}
               {{ selectedGame.bepinex.isMono ? '· Mono' : '· IL2CPP' }}
             </span>
+            <span v-if="selectedGame.bepinex?.isIsolated" class="pill pill-isolated">🔒 档案隔离</span>
             <span v-else class="pill pill-warn">未检测到 BepInEx</span>
+            <button
+              v-if="selectedGame.bepinex && !selectedGame.bepinex.isIsolated"
+              class="btn-plain"
+              title="把 BepInEx 迁入档案目录，支持多档案独立配置与插件组合"
+              @click="isolateModal = { show: true, name: '', busy: false, error: '' }"
+            >
+              📦 启用档案隔离
+            </button>
+            <button
+              v-if="selectedGame.bepinex?.isIsolated"
+              class="btn-plain"
+              title="把当前档案复制回游戏目录，恢复常规模式"
+              @click="doRestore"
+            >
+              ↩ 还原到游戏目录
+            </button>
             <button v-if="selectedGame.bepinex" class="btn-plain" title="查看 BepInEx 运行日志" @click="openLogModal">
               📋 日志
             </button>
@@ -419,6 +489,24 @@ function displayName(p: PluginInfo): string {
         <template v-else-if="scan">
           <!-- 档案栏 -->
           <div class="profile-bar">
+            <template v-if="selectedGame.bepinex?.isIsolated">
+              <span class="bar-label">🔒 档案</span>
+              <template v-if="isolatedList.length">
+                <button
+                  v-for="name in isolatedList"
+                  :key="name"
+                  class="profile-chip"
+                  :class="{ active: isolatedCurrent === name }"
+                  :title="isolatedCurrent === name ? '当前生效档案' : '点击切换（下次启动游戏生效）'"
+                  @click="doSwitchIsolated(name)"
+                >
+                  {{ name }}
+                </button>
+              </template>
+              <span v-else class="dim">暂无档案</span>
+              <span class="dim iso-tip">隔离模式下每个档案拥有独立的插件与配置</span>
+            </template>
+            <template v-else>
             <span class="bar-label">📁 档案</span>
             <template v-if="profiles.length">
               <button
@@ -449,6 +537,7 @@ function displayName(p: PluginInfo): string {
               @keyup.enter="saveCurrentAsProfile"
             />
             <button class="btn-plain" @click="saveCurrentAsProfile">保存当前状态</button>
+            </template>
           </div>
 
           <!-- 插件统计 -->
@@ -597,6 +686,39 @@ function displayName(p: PluginInfo): string {
         <span class="dim">修改后需重启游戏生效</span>
         <button class="btn-primary" :disabled="configEditor.saving" @click="saveConfig">
           {{ configEditor.saving ? '保存中…' : '保存' }}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 档案隔离迁移弹窗 ============ -->
+  <div v-if="isolateModal?.show" class="mask" @click.self="isolateModal.show = false">
+    <div class="dialog small-dialog">
+      <div class="dialog-head">
+        <span>📦 启用档案隔离模式</span>
+        <button class="icon-btn" @click="isolateModal.show = false">✕</button>
+      </div>
+      <div class="isolate-body">
+        <p class="dim">
+          BepInEx 整树将迁移到管理器数据目录，游戏根目录只保留注入件（winhttp.dll 等）。
+          之后可为不同场景创建多个档案，每个档案拥有<b>独立的插件组合与配置</b>，一键切换。
+        </p>
+        <input
+          v-model="isolateModal.name"
+          class="profile-input wide"
+          placeholder="档案名称（如：单机档）"
+          @keyup.enter="doMigrate"
+        />
+        <span v-if="isolateModal.error" class="error-text">{{ isolateModal.error }}</span>
+      </div>
+      <div class="dialog-foot">
+        <span class="dim">迁移不删除任何文件，随时可还原</span>
+        <button
+          class="btn-primary"
+          :disabled="isolateModal.busy || !isolateModal.name.trim()"
+          @click="doMigrate"
+        >
+          {{ isolateModal.busy ? '迁移中…' : '开始迁移' }}
         </button>
       </div>
     </div>
@@ -866,6 +988,11 @@ function displayName(p: PluginInfo): string {
   background: rgba(248, 113, 113, 0.1);
   border: 1px solid rgba(248, 113, 113, 0.35);
 }
+.pill-isolated {
+  color: #c084fc;
+  background: rgba(192, 132, 252, 0.12);
+  border: 1px solid rgba(192, 132, 252, 0.35);
+}
 
 /* ============ 内容区 ============ */
 .content {
@@ -931,6 +1058,17 @@ function displayName(p: PluginInfo): string {
 .profile-chip:disabled {
   opacity: 0.5;
   cursor: default;
+}
+.profile-chip.active {
+  border-color: #c084fc;
+  color: #c084fc;
+  background: rgba(192, 132, 252, 0.1);
+}
+.iso-tip {
+  font-size: 12px;
+}
+.profile-input.wide {
+  width: 220px;
 }
 .profile-del {
   border: none;
@@ -1299,6 +1437,22 @@ function displayName(p: PluginInfo): string {
 .install-dialog {
   width: min(640px, 92vw);
   height: min(560px, 88vh);
+}
+.small-dialog {
+  width: min(460px, 92vw);
+}
+.isolate-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.isolate-body p {
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+.isolate-body b {
+  color: #c084fc;
 }
 .dialog-head {
   display: flex;
