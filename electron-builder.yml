@@ -29,6 +29,8 @@ nsis:
   oneClick: false          # 向导式安装
   perMachine: false        # 按用户安装（无需管理员）
   allowToChangeInstallationDirectory: true   # 用户可选择安装目录
+  # 自定义卸载逻辑：升级/卸载时保留 <安装目录>/data/（用户数据），防止误操作丢失
+  include: build/installer.nsh
   createDesktopShortcut: true
   shortcutName: BepInEx 管理器
   artifactName: BepInExManager-${version}-setup.${ext}
