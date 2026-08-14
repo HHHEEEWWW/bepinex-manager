@@ -10,7 +10,8 @@ import {
   scanLibrary,
   addFilesToLibrary,
   copyEntryToProfile,
-  removeEntryFromProfile
+  removeEntryFromProfile,
+  removeLibraryEntry
 } from './core/library'
 import { listBepInExReleases, installBepInExToLibrary } from './core/installer'
 import { readLog, LogReadResult } from './core/logparser'
@@ -221,6 +222,9 @@ function registerIpcHandlers(): void {  // 发现游戏（Steam 库 + 手动）
   )
   ipcMain.handle(IPC.profileRemoveEntry, (_e, gameDir: string, gameName: string, relPath: string) =>
     removeEntryFromProfile(gameDir, gameName, relPath)
+  )
+  ipcMain.handle(IPC.libraryRemove, (_e, gameDir: string, relPath: string) =>
+    removeLibraryEntry(gameDir, relPath)
   )
 
   // ---- BepInEx 安装 ----

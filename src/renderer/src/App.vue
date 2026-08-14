@@ -156,6 +156,19 @@ async function installEntryToProfile(relPath: string): Promise<void> {
   }
 }
 
+/** 从插件库删除条目（确认后不可恢复） */
+async function removeLibEntry(relPath: string, name: string): Promise<void> {
+  if (!selectedGame.value) return
+  if (!confirm(`确定从插件库删除「${name}」？\n该操作不可恢复；已装入档案的副本不受影响。`)) return
+  try {
+    await window.api.libraryRemove(selectedGame.value.gameDir, relPath)
+    message.success(`已从插件库删除「${name}」`)
+    await refreshLibrary()
+  } catch (err) {
+    message.error(String(err))
+  }
+}
+
 /** 入库结果提示（弹窗 + 摘要） */
 function showLibFeedback(res: LibraryAddResult): void {
   libFeedback.value = {
@@ -747,6 +760,13 @@ function displayName(p: PluginInfo): string {
                       ＋ 装入档案
                     </button>
                     <span v-else class="dim mini">拖到档案区可更新</span>
+                    <button
+                      class="btn-plain mini lib-del"
+                      title="从插件库删除（不可恢复，档案副本不受影响）"
+                      @click.stop="removeLibEntry(e.relPath, e.name)"
+                    >
+                      🗑
+                    </button>
                   </div>
                 </div>
               </div>
@@ -1589,7 +1609,17 @@ function displayName(p: PluginInfo): string {
 .lib-card-actions {
   display: flex;
   align-items: center;
+  gap: 6px;
   min-height: 22px;
+}
+.lib-del {
+  margin-left: auto;
+  opacity: 0.55;
+}
+.lib-del:hover {
+  opacity: 1;
+  border-color: rgba(224, 49, 49, 0.6);
+  color: #ff8080;
 }
 .lib-empty {
   flex: 1;

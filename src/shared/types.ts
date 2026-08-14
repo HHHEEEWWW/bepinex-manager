@@ -262,5 +262,7 @@ export const IPC = {
   /** 复制库条目到当前档案 plugins（装入档案） */
   libraryToProfile: 'library:to-profile',
   /** 从当前档案移除条目（插件库保留） */
-  profileRemoveEntry: 'profile:remove-entry'
+  profileRemoveEntry: 'profile:remove-entry',
+  /** 从插件库删除条目（不可恢复；档案副本不受影响） */
+  libraryRemove: 'library:remove'
 } as const

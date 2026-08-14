@@ -61,6 +61,9 @@ const api = {
   /** 从当前档案移除条目（插件库保留） */
   profileRemoveEntry: (gameDir: string, gameName: string, relPath: string): Promise<boolean> =>
     ipcRenderer.invoke(IPC.profileRemoveEntry, gameDir, gameName, relPath),
+  /** 从插件库删除条目（不可恢复；档案副本不受影响） */
+  libraryRemove: (gameDir: string, relPath: string): Promise<boolean> =>
+    ipcRenderer.invoke(IPC.libraryRemove, gameDir, relPath),
   /** 从拖拽的 File 对象取真实磁盘路径（Electron 37：File.path 已移除，必须用 webUtils） */
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),
 

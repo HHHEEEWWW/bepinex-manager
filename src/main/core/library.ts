@@ -162,7 +162,10 @@ export function scanLibrary(gameDir: string, gameName: string): LibraryScanResul
 
 /**
  * 幂等收集：把各档案 plugins / plugins-disabled 顶层条目复制进库。
- * 同名条目已存在且大小一致 → 跳过；大小不同 → 加 -2/-3 后缀保留两个版本。
+ * 规则（严格幂等，多次刷新/多次拖入绝不产生副本）：
+ *   - 同名条目已存在（无论内容是否相同）→ 一律跳过，以先收集的为准
+ *   - 空目录 / 空文件 → 不收集
+ *   - 仅当库中不存在同名条目时才复制
  */
 export function collectExistingToLibrary(libDir: string): number {
   const gameRoot = dirname(libDir)
@@ -186,6 +189,8 @@ export function collectExistingToLibrary(libDir: string): number {
         if (it.name.startsWith('.')) continue
         if (!it.isDirectory() && !it.name.toLowerCase().endsWith('.dll')) continue
         const src = join(srcDir, it.name)
+        // 空目录/空文件不收集（无插件内容）
+        if (dirSize(src) === 0) continue
         collected += copyToLibrary(src, it.name, libDir, it.isDirectory())
       }
     }
@@ -195,21 +200,9 @@ export function collectExistingToLibrary(libDir: string): number {
 
 /** 复制单个文件/目录到库（同名去重），返回是否实际复制 */
 function copyToLibrary(src: string, name: string, libDir: string, isDir: boolean): number {
-  let target = join(libDir, name)
-  let finalName = name
-  if (existsSync(target)) {
-    const sameSize = dirSize(src) === dirSize(target)
-    if (sameSize) return 0 // 同条目（可能来自另一档案的副本）→ 跳过
-    // 同名不同内容 → 追加序号保留两个版本
-    let n = 2
-    const base = name.replace(/\.dll$/i, '')
-    const ext = name.toLowerCase().endsWith('.dll') ? '.dll' : ''
-    do {
-      finalName = `${base}-${n}${ext}`
-      target = join(libDir, finalName)
-      n++
-    } while (existsSync(target))
-  }
+  const target = join(libDir, name)
+  // 同名条目已存在 → 一律跳过（无论内容，绝不产生 -2/-3 副本）
+  if (existsSync(target)) return 0
   mkdirSync(libDir, { recursive: true })
   try {
     if (isDir) cpSync(src, target, { recursive: true })
@@ -217,6 +210,8 @@ function copyToLibrary(src: string, name: string, libDir: string, isDir: boolean
     return 1
   } catch (err) {
     console.error(`[library] 收集插件失败 ${src}:`, err)
+    // 复制失败时清理可能残留的半成品目录
+    if (existsSync(target)) rmSync(target, { recursive: true, force: true })
     return 0
   }
 }
@@ -467,4 +462,20 @@ export function removeEntryFromProfile(gameDir: string, gameName: string, relPat
     }
   }
   return removed
+}
+
+/**
+ * 从插件库删除条目（文件或目录，不可恢复）。
+ * 已装入档案的副本不受影响（档案保留自己的副本）。
+ */
+export function removeLibraryEntry(gameDir: string, relPath: string): boolean {
+  const libDir = libraryDirOf(gameDir)
+  if (!libDir) throw new Error('游戏不在隔离模式')
+  if (!relPath || relPath.includes('..') || relPath.includes('/') || relPath.includes('\\')) {
+    throw new Error('非法的条目名')
+  }
+  const target = join(libDir, relPath)
+  if (!existsSync(target)) throw new Error(`插件库中不存在条目「${relPath}」`)
+  rmSync(target, { recursive: true, force: true })
+  return true
 }

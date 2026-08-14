@@ -25,6 +25,7 @@ import {
   copyEntryToProfile,
   libraryDirOf,
   removeEntryFromProfile,
+  removeLibraryEntry,
   scanLibrary
 } from '../src/main/core/library'
 
@@ -154,6 +155,22 @@ console.log('== 重名覆盖 ==')
 writeFileSync(directDll, 'MZ-direct-mod-v2')
 const addRes2 = addFilesToLibrary(gameDir, [directDll])
 check('重名标记 updated', addRes2.updated.some((i) => i.fileName === 'DirectMod.dll'), JSON.stringify(addRes2.updated))
+
+// ---- 严格幂等：同名不同大小也不建副本 ----
+console.log('== 收集严格幂等 ==')
+// 修改档案里的 FakeMod.dll（模拟用户更新插件后大小变化）
+writeFileSync(join(bepDir, 'plugins', 'FakeMod.dll'), 'MZ-fake-mod-UPDATED-VERSION')
+const scan3 = scanLibrary(gameDir, gameName)
+check('更新后刷新不产生副本', scan3.collected === 0, `collected=${scan3.collected}`)
+check('无 -2 副本条目', !scan3.entries.some((e) => e.relPath.includes('-2')), JSON.stringify(scan3.entries.map((e) => e.relPath)))
+
+// ---- 库条目删除 ----
+console.log('== removeLibraryEntry ==')
+const delRes = removeLibraryEntry(gameDir, 'Scattered.dll')
+check('删除库条目成功', delRes === true)
+check('库中已删除', !existsSync(join(libDir!, 'Scattered.dll')))
+const scan4 = scanLibrary(gameDir, gameName)
+check('删除后库扫描不含该条目', !scan4.entries.some((e) => e.relPath === 'Scattered.dll'))
 
 rmSync(tmpRoot, { recursive: true, force: true })
 console.log(`\n结果：${pass} 通过 / ${fail} 失败`)
