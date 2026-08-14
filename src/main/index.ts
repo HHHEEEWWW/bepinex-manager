@@ -1,6 +1,6 @@
 import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join, dirname } from 'path'
-import { readFileSync, writeFileSync, statSync, mkdirSync } from 'fs'
+import { readFileSync, writeFileSync, statSync, mkdirSync, existsSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { IPC } from '@shared/types'
 import { discoverGames, addManualGame } from './core/games'
@@ -56,7 +56,10 @@ function createWindow(): void {
  * 数据根目录解析（管理器的全部数据集中存放，不散落）：
  *   1. 环境变量 BEPINEX_MANAGER_DATA_DIR 显式指定（测试/高级用户）
  *   2. 打包发布版：安装目录内 <exe 所在目录>/data（随安装目录走，便携）
- *   3. 开发模式：%APPDATA%/bepinex-manager（沿用现状）
+ *   3. 开发模式：%APPDATA%/bepinex-manager
+ *
+ * 注意：app.getPath('userData') 默认就是 %APPDATA%/<appName>=bepinex-manager，
+ * 不要再拼接一层（否则变成 .../bepinex-manager/bepinex-manager，插件库全部定位失败）。
  */
 function resolveDataRoot(): string {
   if (process.env.BEPINEX_MANAGER_DATA_DIR) {
@@ -65,7 +68,7 @@ function resolveDataRoot(): string {
   if (app.isPackaged) {
     return join(dirname(app.getPath('exe')), 'data')
   }
-  return join(app.getPath('userData'), 'bepinex-manager')
+  return app.getPath('userData')
 }
 
 app.whenReady().then(() => {
