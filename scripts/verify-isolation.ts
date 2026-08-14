@@ -52,7 +52,7 @@ try {
   console.log('profileId=' + m.profileId + ' target -> ' + m.target)
   // 目录结构断言：<dataRoot>/plugins/<slug>-<hash>/<profileId>/BepInEx，全 ASCII
   const libRoot = pluginsRootDir()
-  if (!libRoot.includes(join(dataDir, 'plugins'))) throw new Error('插件库根目录错误: ' + libRoot)
+  if (!libRoot.includes(join(dataDir, 'plugin-library'))) throw new Error('插件库根目录错误: ' + libRoot)
   const gameRoot = gamePluginsRootDir(GAME_NAME, gameDir)
   if (!/^[\x00-\x7f]+$/.test(gameRoot)) throw new Error('插件库游戏目录含非 ASCII: ' + gameRoot)
   if (!/test-game-\w{4}$/.test(gameRoot.split('\\').pop() ?? '')) {

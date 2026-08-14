@@ -62,12 +62,15 @@ export function newProfileId(): string {
 
 /**
  * 插件库目录结构（v2，分游戏存放、目录名全 ASCII）：
- *   <dataRoot>/plugins/<gameSlug>/<profileId>/
+ *   <dataRoot>/plugin-library/<gameSlug>/<profileId>/
  *     ├─ profile.json   { name: 显示名, gameName, createdAt }
  *     └─ BepInEx/
+ *
+ * 注意：根目录命名为 plugin-library 而非 plugins，
+ * 避免与 BepInEx 框架内部的 plugins（插件加载目录）混淆。
  */
 export function pluginsRootDir(): string {
-  return join(dataRootDir(), 'plugins')
+  return join(dataRootDir(), 'plugin-library')
 }
 
 /** 游戏在插件库中的根目录（按 ASCII 化游戏名 + 短哈希分游戏存放） */
