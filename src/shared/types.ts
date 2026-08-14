@@ -152,5 +152,11 @@ export const IPC = {
   /** 列出 BepInEx 可用版本 */
   bepinexListReleases: 'bepinex:list-releases',
   /** 安装 BepInEx */
-  bepinexInstall: 'bepinex:install'
+  bepinexInstall: 'bepinex:install',
+  /** 读取游戏日志（offset=0 全量） */
+  logsRead: 'logs:read',
+  /** 读取日志增量（自上次读取以来） */
+  logsTail: 'logs:tail',
+  /** 重置日志读取偏移 */
+  logsResetOffset: 'logs:reset-offset'
 } as const

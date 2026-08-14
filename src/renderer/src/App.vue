@@ -7,7 +7,8 @@ import type {
   PluginConflict,
   PluginInfo,
   ProfileDef,
-  BepInExRelease
+  BepInExRelease,
+  LogReadResult
 } from '@shared/types'
 
 const { message } = createDiscreteApi(['message'], {
@@ -35,6 +36,21 @@ const installBusy = ref(false)
 
 // ---- 配置编辑器 ----
 const configEditor = ref<{ plugin: PluginInfo; content: string; saving: boolean } | null>(null)
+
+// ---- 日志面板 ----
+const showLogModal = ref(false)
+const logData = ref<LogReadResult | null>(null)
+const logFilter = ref<'all' | 'error' | 'warn'>('all')
+let logTimer: ReturnType<typeof setInterval> | null = null
+
+const filteredLogs = computed(() => {
+  if (!logData.value) return []
+  if (logFilter.value === 'all') return logData.value.entries
+  if (logFilter.value === 'error') {
+    return logData.value.entries.filter((e) => e.level === 'error' || e.level === 'fatal')
+  }
+  return logData.value.entries.filter((e) => e.level === 'warn')
+})
 
 onMounted(async () => {
   try {
@@ -249,6 +265,48 @@ function fmtSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
+// ---- 日志操作 ----
+async function openLogModal(): Promise<void> {
+  if (!selectedGame.value) return
+  showLogModal.value = true
+  await loadLog()
+  // 打开期间每 5 秒增量刷新
+  if (logTimer) clearInterval(logTimer)
+  logTimer = setInterval(async () => {
+    if (!selectedGame.value || !showLogModal.value) return
+    try {
+      const tail = await window.api.tailLog(selectedGame.value.gameDir)
+      if (tail.entries.length > 0 && logData.value) {
+        logData.value = {
+          ...tail,
+          entries: [...logData.value.entries, ...tail.entries],
+          entryCount: logData.value.entryCount + tail.entries.length,
+          errorStats: tail.errorStats.length > 0 ? tail.errorStats : logData.value.errorStats
+        }
+      }
+    } catch {
+      /* 游戏目录变化时静默 */
+    }
+  }, 5000)
+}
+
+async function loadLog(): Promise<void> {
+  if (!selectedGame.value) return
+  try {
+    logData.value = await window.api.readLog(selectedGame.value.gameDir)
+  } catch (e) {
+    message.error(String(e))
+  }
+}
+
+function closeLogModal(): void {
+  showLogModal.value = false
+  if (logTimer) {
+    clearInterval(logTimer)
+    logTimer = null
+  }
+}
+
 function displayName(p: PluginInfo): string {
   return p.meta?.name || p.fileName.replace(/\.dll$/i, '')
 }
@@ -311,6 +369,9 @@ function displayName(p: PluginInfo): string {
               {{ selectedGame.bepinex.isMono ? '· Mono' : '· IL2CPP' }}
             </span>
             <span v-else class="pill pill-warn">未检测到 BepInEx</span>
+            <button v-if="selectedGame.bepinex" class="btn-plain" title="查看 BepInEx 运行日志" @click="openLogModal">
+              📋 日志
+            </button>
             <button v-if="!selectedGame.bepinex" class="btn-primary" @click="openInstallModal">
               ⬇ 安装 BepInEx
             </button>
@@ -458,8 +519,56 @@ function displayName(p: PluginInfo): string {
     </div>
   </div>
 
-  <!-- ============ BepInEx 安装弹窗 ============ -->
-  <div v-if="showInstallModal" class="mask" @click.self="showInstallModal = false">
+  <!-- ============ 日志弹窗 ============ -->
+  <div v-if="showLogModal" class="mask" @click.self="closeLogModal">
+    <div class="dialog log-dialog">
+      <div class="dialog-head">
+        <span>📋 运行日志 — {{ selectedGame?.name }}</span>
+        <div class="log-head-right">
+          <select v-model="logFilter" class="log-filter">
+            <option value="all">全部</option>
+            <option value="error">仅错误</option>
+            <option value="warn">仅警告</option>
+          </select>
+          <button class="btn-plain" @click="loadLog">刷新</button>
+          <button class="icon-btn" @click="closeLogModal">✕</button>
+        </div>
+      </div>
+      <div v-if="logData?.errorStats.length" class="log-stats">
+        <span class="dim">⚠ 崩溃定位（错误最多的来源）：</span>
+        <span
+          v-for="s in logData.errorStats.slice(0, 5)"
+          :key="s.source"
+          class="pill pill-conflict"
+        >
+          {{ s.source }} × {{ s.count }}
+        </span>
+      </div>
+      <div v-if="!logData?.exists" class="center-box slim">
+        <div class="center-text dim">日志文件不存在（首次运行游戏后生成）</div>
+      </div>
+      <div v-else-if="logData.entryCount === 0" class="center-box slim">
+        <div class="center-text dim">日志为空</div>
+      </div>
+      <div v-else class="log-list">
+        <div
+          v-for="(e, i) in filteredLogs"
+          :key="i"
+          class="log-line"
+          :class="e.level"
+        >
+          <span class="log-dot" :class="e.level"></span>
+          <span class="log-src mono">{{ e.source }}</span>
+          <span class="log-msg mono" :class="{ stack: e.isStack }">{{ e.message }}</span>
+        </div>
+        <div v-if="filteredLogs.length === 0" class="center-box slim">
+          <div class="center-text dim">当前过滤条件下没有条目</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ BepInEx 安装弹窗 ============ -->  <div v-if="showInstallModal" class="mask" @click.self="showInstallModal = false">
     <div class="dialog install-dialog">
       <div class="dialog-head">
         <span>⬇ 安装 BepInEx — {{ selectedGame?.name }}</span>
@@ -1011,6 +1120,98 @@ function displayName(p: PluginInfo): string {
 .cfg-dialog {
   width: min(720px, 92vw);
   height: min(560px, 88vh);
+}
+.log-dialog {
+  width: min(860px, 94vw);
+  height: min(600px, 90vh);
+}
+.log-head-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.log-filter {
+  background: #12151a;
+  border: 1px solid #343a46;
+  color: #e8eaee;
+  border-radius: 8px;
+  padding: 5px 8px;
+  font-size: 12.5px;
+  outline: none;
+}
+.log-stats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 16px;
+  border-bottom: 1px solid #2a2f39;
+  font-size: 12px;
+}
+.log-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 14px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+.log-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.log-line:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+.log-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  align-self: center;
+  transform: translateY(-1px);
+}
+.log-dot.info {
+  background: #4c9aff;
+}
+.log-dot.debug {
+  background: #6b7280;
+}
+.log-dot.warn {
+  background: #fbbf24;
+}
+.log-dot.error,
+.log-dot.fatal {
+  background: #f87171;
+}
+.log-src {
+  color: #8b93a1;
+  flex-shrink: 0;
+  min-width: 110px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.log-msg {
+  color: #c9d1dc;
+  user-select: text;
+}
+.log-line.warn .log-msg {
+  color: #fbbf24;
+}
+.log-line.error .log-msg,
+.log-line.fatal .log-msg {
+  color: #f87171;
+}
+.log-msg.stack {
+  color: #8b93a1;
+  padding-left: 14px;
 }
 .install-dialog {
   width: min(640px, 92vw);

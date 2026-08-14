@@ -1,5 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { GameEntry, GameScanResult, ProfileDef, BepInExRelease } from '../shared/types'
+import type {
+  GameEntry,
+  GameScanResult,
+  ProfileDef,
+  BepInExRelease,
+  LogReadResult
+} from '../shared/types'
 import { IPC } from '../shared/types'
 
 const api = {
@@ -29,6 +35,12 @@ const api = {
     ipcRenderer.invoke(IPC.profilesRename, gameDir, profileId, name),
   applyProfile: (gameDir: string, profileId: string): Promise<{ applied: number; rolledBack: number; changes: string[] }> =>
     ipcRenderer.invoke(IPC.profilesApply, gameDir, profileId),
+
+  // ---- 日志 ----
+  readLog: (gameDir: string): Promise<LogReadResult> => ipcRenderer.invoke(IPC.logsRead, gameDir),
+  tailLog: (gameDir: string): Promise<LogReadResult> => ipcRenderer.invoke(IPC.logsTail, gameDir),
+  resetLogOffset: (gameDir: string): Promise<boolean> =>
+    ipcRenderer.invoke(IPC.logsResetOffset, gameDir),
 
   // ---- BepInEx 安装 ----
   listBepInExReleases: (runtime: 'mono' | 'il2cpp'): Promise<BepInExRelease[]> =>

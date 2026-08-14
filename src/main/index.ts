@@ -1,6 +1,6 @@
 import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join } from 'path'
-import { readFileSync, writeFileSync } from 'fs'
+import { readFileSync, writeFileSync, statSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { IPC } from '@shared/types'
 import { discoverGames, addManualGame } from './core/games'
@@ -8,6 +8,10 @@ import { detectBepInEx } from './core/bepinex'
 import { scanPlugins, setPluginEnabled } from './core/plugins'
 import { listProfiles, createProfile, deleteProfile, renameProfile, applyProfile } from './core/profiles'
 import { listBepInExReleases, installBepInEx, bepinexAlreadyInstalled } from './core/installer'
+import { readLog, LogReadResult } from './core/logparser'
+
+/** 每个游戏的日志读取偏移缓存（gameDir -> 字节偏移） */
+const logOffsets = new Map<string, number>()
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -61,8 +65,7 @@ app.on('window-all-closed', () => {
   }
 })
 
-function registerIpcHandlers(): void {
-  // 发现游戏（Steam 库 + 手动）
+function registerIpcHandlers(): void {  // 发现游戏（Steam 库 + 手动）
   ipcMain.handle(IPC.discoverGames, () => discoverGames())
 
   // 手动添加游戏目录（弹目录选择框）
@@ -125,6 +128,33 @@ function registerIpcHandlers(): void {
     return applyProfile(bepinex, profileId)
   })
 
+  // ---- 日志 ----
+  const logGame = (gameDir: string): { bepinex: NonNullable<ReturnType<typeof detectBepInEx>>; key: string } => {
+    const bepinex = detectBepInEx(gameDir)
+    if (!bepinex) throw new Error(`未在 ${gameDir} 检测到 BepInEx 安装`)
+    return { bepinex, key: gameDir.toLowerCase() }
+  }
+
+  ipcMain.handle(IPC.logsRead, (_e, gameDir: string): LogReadResult => {
+    const { bepinex, key } = logGame(gameDir)
+    const result = readLog(bepinex, 0)
+    logOffsets.set(key, statSyncSafe(bepinex.logFile))
+    return result
+  })
+
+  ipcMain.handle(IPC.logsTail, (_e, gameDir: string): LogReadResult => {
+    const { bepinex, key } = logGame(gameDir)
+    const offset = logOffsets.get(key) ?? 0
+    const result = readLog(bepinex, offset)
+    logOffsets.set(key, statSyncSafe(bepinex.logFile))
+    return result
+  })
+
+  ipcMain.handle(IPC.logsResetOffset, (_e, gameDir: string) => {
+    logOffsets.delete(gameDir.toLowerCase())
+    return true
+  })
+
   // ---- BepInEx 安装 ----
   ipcMain.handle(IPC.bepinexListReleases, (_e, runtime: 'mono' | 'il2cpp') =>
     listBepInExReleases(runtime)
@@ -144,4 +174,14 @@ function registerIpcHandlers(): void {
       })
     }
   )
+}
+
+/** 日志文件当前大小（不存在返回 0），用于记录增量偏移 */
+function statSyncSafe(logFile: string | null): number {
+  if (!logFile) return 0
+  try {
+    return statSync(logFile).size
+  } catch {
+    return 0
+  }
 }
