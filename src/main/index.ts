@@ -14,7 +14,7 @@ import {
   removeLibraryEntry
 } from './core/library'
 import { listBepInExReleases, installBepInExToLibrary } from './core/installer'
-import { checkForUpdates } from './core/updater'
+import { checkForUpdates, downloadUpdate, applyUpdate } from './core/updater'
 import { searchThunderstore, installThunderstorePackage } from './core/thunderstore'
 import type { ThunderstorePackage } from './core/thunderstore'
 import { readLog, LogReadResult } from './core/logparser'
@@ -238,6 +238,16 @@ function registerIpcHandlers(): void {  // 发现游戏（Steam 库 + 手动）
 
   // 检查更新（GitHub Releases）
   ipcMain.handle(IPC.updatesCheck, () => checkForUpdates())
+
+  // 下载最新版安装包（带进度事件）
+  ipcMain.handle(IPC.updatesDownload, (_e, setupUrl: string) =>
+    downloadUpdate(setupUrl, (p) => {
+      BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('updates:download-progress', p))
+    })
+  )
+
+  // 应用更新（静默安装 + 重启）
+  ipcMain.handle(IPC.updatesApply, (_e, setupPath: string) => applyUpdate(setupPath))
 
   // ---- Thunderstore 集成 ----
   ipcMain.handle(IPC.thunderstoreSearch, (_e, query: string) => searchThunderstore(query))

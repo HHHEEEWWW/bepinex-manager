@@ -227,6 +227,10 @@ async function openLibraryDir(): Promise<void> {
 // ---- 检查更新 ----
 const checkingUpdate = ref(false)
 const updateModal = ref<UpdateCheckResult | null>(null)
+const updateDownloading = ref(false)
+const updateDownloadPercent = ref(0)
+const updateDownloadMsg = ref('')
+let updateUnsub: (() => void) | null = null
 
 async function checkUpdate(): Promise<void> {
   checkingUpdate.value = true
@@ -248,6 +252,49 @@ async function checkUpdate(): Promise<void> {
 
 function openUpdateUrl(): void {
   if (updateModal.value?.url) window.open(updateModal.value.url, '_blank')
+}
+
+/** 应用内下载安装包（安装版）：下载 → 确认 → 静默安装并重启 */
+async function downloadAndUpdate(): Promise<void> {
+  const res = updateModal.value
+  if (!res || !res.setupUrl) {
+    message.error('未获取到安装包下载地址，请前往 GitHub 手动下载')
+    openUpdateUrl()
+    return
+  }
+  if (!res.autoUpdatable) {
+    message.warning('便携版不支持应用内自动升级，请下载便携包手动解压覆盖')
+    openUpdateUrl()
+    return
+  }
+  updateDownloading.value = true
+  updateDownloadPercent.value = 0
+  updateDownloadMsg.value = '准备下载…'
+  updateUnsub?.()
+  updateUnsub = window.api.onUpdateProgress((p) => {
+    updateDownloadPercent.value = p.percent
+    updateDownloadMsg.value = p.message
+  })
+  try {
+    const dl = await window.api.downloadUpdate(res.setupUrl)
+    updateDownloadMsg.value = '下载完成，准备安装…'
+    updateUnsub?.()
+    updateUnsub = null
+    // 确认后静默安装（安装器会自动重启应用）
+    const ok = await window.api.applyUpdate(dl.setupPath)
+    if (ok.ok) {
+      updateModal.value = null
+      message.success('安装器已启动，应用即将退出并在安装完成后自动重启')
+    } else {
+      updateDownloading.value = false
+      message.error(`自动升级失败：${ok.message}`)
+    }
+  } catch (err) {
+    updateDownloading.value = false
+    updateUnsub?.()
+    updateUnsub = null
+    message.error(`下载更新失败：${(err as Error).message}`)
+  }
 }
 
 // ---- Thunderstore 搜索/安装 ----
@@ -1148,10 +1195,19 @@ function displayName(p: PluginInfo): string {
           <div class="mod-result-title">更新说明</div>
           <pre class="update-notes-pre">{{ updateModal.notes }}</pre>
         </div>
+        <!-- 下载进度 -->
+        <div v-if="updateDownloading" class="update-download">
+          <div class="progress-bar"><div class="progress-fill" :style="{ width: updateDownloadPercent + '%' }"></div></div>
+          <span class="dim mini">{{ updateDownloadMsg }}（{{ updateDownloadPercent }}%）</span>
+        </div>
       </div>
       <div class="dialog-foot">
-        <span class="dim">下载安装版后直接覆盖安装，数据（安装目录 data/）会保留</span>
-        <button class="btn-primary" @click="openUpdateUrl">⬇ 前往 GitHub 下载</button>
+        <span v-if="updateModal.autoUpdatable" class="dim">应用内自动升级：下载安装包后自动静默安装并重启，数据（安装目录 data/）会保留</span>
+        <span v-else class="dim">当前为便携版：请下载便携包手动解压覆盖（运行中的数据目录 data/ 保留）</span>
+        <button class="btn-plain" @click="openUpdateUrl" :disabled="updateDownloading">GitHub 页面</button>
+        <button v-if="updateModal.autoUpdatable" class="btn-primary" @click="downloadAndUpdate" :disabled="updateDownloading">
+          {{ updateDownloading ? '⏳ ' + updateDownloadMsg : '⬇ 下载并自动安装' }}
+        </button>
       </div>
     </div>
   </div>
@@ -2547,10 +2603,22 @@ function displayName(p: PluginInfo): string {
   border-radius: 6px;
   overflow: hidden;
 }
+.progress-bar {
+  height: 10px;
+  background: #12151a;
+  border-radius: 6px;
+  overflow: hidden;
+}
 .progress-fill {
   height: 100%;
   background: linear-gradient(90deg, #4c9aff, #7a5cff);
   border-radius: 6px;
   transition: width 0.15s ease;
+}
+.update-download {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 </style>

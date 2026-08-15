@@ -8,6 +8,9 @@ import type {
   LibraryAddResult,
   LibraryScanResult,
   UpdateCheckResult,
+  UpdateDownloadProgress,
+  UpdateDownloadResult,
+  UpdateApplyResult,
   ThunderstorePackage,
   ThunderstoreInstallResult
 } from '../shared/types'
@@ -73,6 +76,18 @@ const api = {
   // ---- 更新 ----
   /** 检查更新（GitHub Releases，5 分钟缓存） */
   checkForUpdates: (): Promise<UpdateCheckResult> => ipcRenderer.invoke(IPC.updatesCheck),
+  /** 下载最新版安装包（setup.exe），进度经 onUpdateProgress 推送 */
+  downloadUpdate: (setupUrl: string): Promise<UpdateDownloadResult> =>
+    ipcRenderer.invoke(IPC.updatesDownload, setupUrl),
+  /** 应用更新：静默安装已下载的 setup.exe 并重启 */
+  applyUpdate: (setupPath: string): Promise<UpdateApplyResult> =>
+    ipcRenderer.invoke(IPC.updatesApply, setupPath),
+  /** 更新下载进度事件（返回取消订阅函数） */
+  onUpdateProgress: (cb: (p: UpdateDownloadProgress) => void): (() => void) => {
+    const listener = (_e: unknown, p: UpdateDownloadProgress): void => cb(p)
+    ipcRenderer.on('updates:download-progress', listener)
+    return () => ipcRenderer.removeListener('updates:download-progress', listener)
+  },
 
   // ---- Thunderstore ----
   /** 搜索 Thunderstore 包 */

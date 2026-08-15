@@ -231,6 +231,31 @@ export interface UpdateCheckResult {
   notes: string | null
   /** 查询失败原因（成功为 null） */
   error: string | null
+  /** 是否安装版（NSIS，支持应用内自动升级；便携版需手动下载） */
+  autoUpdatable: boolean
+  /** 最新版安装包（setup.exe）下载地址；autoUpdatable 或查询失败时为 null */
+  setupUrl: string | null
+}
+
+/** 更新下载进度 */
+export interface UpdateDownloadProgress {
+  phase: 'download' | 'done' | 'error'
+  percent: number
+  message: string
+}
+
+/** 更新下载结果 */
+export interface UpdateDownloadResult {
+  /** 已下载的 setup.exe 绝对路径 */
+  setupPath: string
+  /** 文件大小（字节） */
+  size: number
+}
+
+/** 自动升级结果 */
+export interface UpdateApplyResult {
+  ok: boolean
+  message: string
 }
 
 /** Thunderstore 搜索结果条目 */
@@ -313,6 +338,10 @@ export const IPC = {
   libraryRemove: 'library:remove',
   /** 检查更新（GitHub Releases） */
   updatesCheck: 'updates:check',
+  /** 下载最新版安装包（setup.exe，带进度事件 updates:download-progress） */
+  updatesDownload: 'updates:download',
+  /** 应用更新（静默安装已下载的 setup.exe 并重启） */
+  updatesApply: 'updates:apply',
   /** Thunderstore 搜索 */
   thunderstoreSearch: 'thunderstore:search',
   /** Thunderstore 安装（下载 → 入库 → 装入档案） */
