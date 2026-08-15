@@ -24,6 +24,8 @@ const REPO = 'BepInEx/BepInEx'
 const DOWNLOAD_BASE = `https://github.com/${REPO}/releases/download`
 const ATOM_URL = `https://github.com/${REPO}/releases.atom`
 const ASSETS_URL = (tag: string): string => `https://github.com/${REPO}/releases/expanded_assets/${encodeURIComponent(tag)}`
+/** BepInEx 官方 CI 构建站（Bleeding Edge 最新构建；GitHub Releases 的 6.x 只有老旧的 pre.2） */
+const BUILDS_URL = 'https://builds.bepinex.dev/projects/bepinex_be'
 
 export type ProgressCallback = (p: InstallProgress) => void
 
@@ -68,6 +70,28 @@ export async function listBepInExReleases(runtime: UnityRuntime): Promise<BepInE
     /* 缓存损坏则忽略 */
   }
 
+  // 通道 0：BepInEx 官方 CI 构建站（Bleeding Edge 最新构建，支持新 Unity metadata）。
+  // 置顶推荐：GitHub Releases 的 6.x 仅有 6.0.0-pre.2（Cpp2IL 只支持 metadata 23-29，
+  // 新游戏 metadata 31 会 InteropManager 初始化失败）。
+  const be = await fetchBleedingEdgeBuild(runtime)
+  const github = await fetchGithubReleases(runtime)
+
+  const result = be ? [be, ...github] : github
+  if (result.length === 0) return result
+
+  // 写缓存
+  try {
+    mkdirSync(cacheDir, { recursive: true })
+    writeFileSync(cacheFile, JSON.stringify(result), 'utf8')
+  } catch {
+    /* 缓存写入失败不影响功能 */
+  }
+  return result
+}
+
+/** 通道：GitHub API → 缓存 → 网页（Atom + expanded_assets）→ 内置兜底 */
+async function fetchGithubReleases(runtime: UnityRuntime): Promise<BepInExRelease[]> {
+  const cacheFile = join(dataRootDir(), 'cache', `releases-${runtime}.json`)
   const res = await fetch(REPO_API + '?per_page=20', { headers: { 'User-Agent': 'bepinex-manager' } })
   if (!res.ok) {
     // 限流/网络失败时：缓存 → GitHub 网页（Atom + expanded_assets，不受 API 限流）→ 内置列表
@@ -94,16 +118,45 @@ export async function listBepInExReleases(runtime: UnityRuntime): Promise<BepInE
     assets: Array<{ name: string; browser_download_url: string; size: number }>
   }>
 
-  const result = data.map((r) => filterRelease(r, runtime)).filter((r) => r.assets.length > 0)
+  return data.map((r) => filterRelease(r, runtime)).filter((r) => r.assets.length > 0)
+}
 
-  // 写缓存
+/**
+ * 通道：BepInEx 官方 CI 构建站（builds.bepinex.dev）
+ * 抓取最新 Bleeding Edge 构建（如 be.785）的 win-x64 zip，作为置顶推荐版本。
+ * 该通道不受 GitHub API 限流；失败返回 null（不影响其他通道）。
+ */
+async function fetchBleedingEdgeBuild(runtime: UnityRuntime): Promise<BepInExRelease | null> {
   try {
-    mkdirSync(cacheDir, { recursive: true })
-    writeFileSync(cacheFile, JSON.stringify(result), 'utf8')
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 15_000)
+    const res = await fetch(BUILDS_URL, {
+      headers: { 'User-Agent': 'bepinex-manager', Accept: 'text/html' },
+      signal: controller.signal
+    })
+    clearTimeout(timer)
+    if (!res.ok) return null
+    const html = await res.text()
+
+    // 第一个 artifact-item = 最新构建；提取目标运行时 zip 链接
+    const first = html.match(/<div class="artifact-item">([\s\S]*?)<\/div>\s*<div class="artifact-item">/)
+    const block = first ? first[1] : html
+    const target = runtime === 'il2cpp' ? 'Unity.IL2CPP-win-x64' : 'Unity.Mono-win-x64'
+    const link = block.match(new RegExp(`href="(/projects/bepinex_be/\\d+/[^"]*${target}[^"]*\\.zip)"`))
+    if (!link) return null
+    const name = decodeURIComponent(link[1].split('/').pop() ?? '')
+    const url = 'https://builds.bepinex.dev' + link[1]
+    const build = name.match(/be\.(\d+)/)
+    const tag = build ? `v6.0.0-be.${build[1]}` : 'v6.0.0-be'
+    return {
+      tag,
+      prerelease: true,
+      publishedAt: '',
+      assets: [{ name, url, size: 0 }]
+    }
   } catch {
-    /* 缓存写入失败不影响功能 */
+    return null
   }
-  return result
 }
 
 /** 过滤单个 release（纯函数，便于测试） */
