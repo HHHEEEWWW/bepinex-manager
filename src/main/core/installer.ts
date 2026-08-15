@@ -18,6 +18,7 @@ import { execFileSync } from 'child_process'
 import type { BepInExRelease, InstallProgress, UnityRuntime } from '@shared/types'
 import { profileDir, newProfileId, writeMeta, pointDoorstopToProfile } from './isolation'
 import { dataRootDir } from './profiles'
+import { applyCpp2IlPatch } from './patch-cpp2il'
 
 const REPO_API = 'https://api.github.com/repos/BepInEx/BepInEx/releases'
 const REPO = 'BepInEx/BepInEx'
@@ -79,8 +80,13 @@ export async function listBepInExReleases(runtime: UnityRuntime): Promise<BepInE
 /** 通道：GitHub API → 缓存 → 网页（Atom + expanded_assets）→ 内置兜底 */
 async function fetchGithubReleases(runtime: UnityRuntime): Promise<BepInExRelease[]> {
   const cacheFile = join(dataRootDir(), 'cache', `releases-${runtime}.json`)
-  const res = await fetch(REPO_API + '?per_page=20', { headers: { 'User-Agent': 'bepinex-manager' } })
-  if (!res.ok) {
+  let res: Response | null = null
+  try {
+    res = await fetch(REPO_API + '?per_page=20', { headers: { 'User-Agent': 'bepinex-manager' } })
+  } catch {
+    res = null // 连接级错误（DNS/TLS/断网）同样走回退链
+  }
+  if (!res || !res.ok) {
     // 限流/网络失败时：缓存 → GitHub 网页（Atom + expanded_assets，不受 API 限流）→ 内置列表
     try {
       if (existsSync(cacheFile)) {
@@ -368,6 +374,19 @@ export async function installBepInExToLibrary(
     }
     if (!existsSync(join(gameDir, 'dotnet', 'coreclr.dll'))) {
       throw new Error('压缩包内未包含 dotnet/coreclr.dll（IL2CPP 运行时），无法建立隔离模式')
+    }
+
+    // 3.5. Cpp2IL Unity 6 兼容补丁（sanity limit 0xC0000 → 0x400000）：
+    //      Unity 6 大游戏 metareg 计数可超 78.6 万，未修复的 Cpp2IL 会
+    //      interop 生成失败（Pax Autocratica 2026-08 更新实测触发）。
+    //      仅替换已知未修复版本（版本标记匹配），已修复/未知版本自动跳过。
+    try {
+      const patch = applyCpp2IlPatch(destBep)
+      if (patch.applied) {
+        onProgress?.({ phase: 'extract', percent: 92, message: '已应用 Cpp2IL Unity 6 兼容补丁' })
+      }
+    } catch {
+      /* 补丁失败不影响安装主流程（游戏仍可启动，仅大 Unity 6 游戏可能 interop 失败） */
     }
 
     // 3. 元数据 + doorstop 指向插件库

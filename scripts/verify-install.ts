@@ -7,10 +7,15 @@
  */
 process.env.BEPINEX_MANAGER_DATA_DIR = 'E:\\trainer\\beplnexmanager\\BepInExManager\\data'
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'fs'
-import { join } from 'path'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync } from 'fs'
+import { join, dirname } from 'path'
 import { listBepInExReleases, installBepInExToLibrary } from '../src/main/core/installer'
 import { detectBepInEx } from '../src/main/core/bepinex'
+import {
+  cpp2ilNeedsPatch,
+  isCpp2IlPatched,
+  resolveCpp2IlPatchDir
+} from '../src/main/core/patch-cpp2il'
 
 let pass = 0
 let fail = 0
@@ -57,6 +62,23 @@ async function main(): Promise<void> {
   console.log('\n== 检测验证 ==')
   const info = detectBepInEx(gameDir)
   check('隔离模式检测', info?.isIsolated === true, JSON.stringify(info))
+
+  // 5.5) Cpp2IL Unity 6 兼容补丁验证
+  console.log('\n== Cpp2IL 补丁验证 ==')
+  const patchDir = resolveCpp2IlPatchDir()
+  check('补丁源存在', !!patchDir, patchDir ?? 'not found')
+  const bepDir = info?.rootDir ?? join(dirname(dirname(r.target)), 'BepInEx')
+  const coreDll = join(bepDir, 'core', 'Cpp2IL.Core.dll')
+  check('core/Cpp2IL.Core.dll 存在', existsSync(coreDll))
+  const needsBefore = cpp2ilNeedsPatch(bepDir)
+  check('安装链已自动打补丁', !needsBefore, needsBefore ? '仍是未修复版本' : '已补丁/无需补丁')
+  check('补丁后标记消失', isCpp2IlPatched(bepDir))
+  // 备份目录应存在（若应用过补丁）
+  const coreDir = join(bepDir, 'core')
+  const baks = existsSync(coreDir)
+    ? readdirSync(coreDir).filter((d) => d.startsWith('bak-cpp2il-'))
+    : []
+  check('原文件已备份', baks.length > 0, `备份目录: ${baks.join(', ')}`)
 
   // 6) 清理
   rmSync(gameDir, { recursive: true, force: true })

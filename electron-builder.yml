@@ -17,6 +17,9 @@ files:
 extraResources:
   - from: tools/plugin-metadata-reader/bin/Release/net9.0/win-x64/publish/
     to: tools/plugin-metadata-reader
+  # Cpp2IL Unity 6 兼容补丁（sanity limit 0xC0000 → 0x400000，用于大 Unity 6 游戏 interop 生成）
+  - from: tools/cpp2il-patch/
+    to: tools/cpp2il-patch
 
 win:
   target:

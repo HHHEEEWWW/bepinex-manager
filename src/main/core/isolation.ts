@@ -25,6 +25,7 @@ import {
 import { join, dirname } from 'path'
 import { dataRootDir } from './profiles'
 import { readDoorstopTarget } from './bepinex'
+import { applyCpp2IlPatch } from './patch-cpp2il'
 import type { IsolatedProfileInfo } from '@shared/types'
 
 /** preloader 候选文件名（BepInEx 5/6 各变体） */
@@ -239,6 +240,12 @@ export function migrateToIsolated(
     // 1. 复制 BepInEx 整树（跨盘安全）+ 元数据
     mkdirSync(dirname(destBep), { recursive: true })
     cpSync(src, destBep, { recursive: true })
+    // 1.5. Cpp2IL Unity 6 兼容补丁（迁移来源可能是未修复版本）
+    try {
+      applyCpp2IlPatch(destBep)
+    } catch {
+      /* 补丁失败不影响迁移主流程 */
+    }
     writeMeta(gameName, gameDir, profileId, {
       name: profileName,
       gameName,
@@ -310,6 +317,13 @@ export function createIsolatedProfile(
   // 确保 plugins/config 目录存在（空目录不会随 cpSync 复制）
   mkdirSync(join(destBep, 'plugins'), { recursive: true })
   mkdirSync(join(destBep, 'config'), { recursive: true })
+
+  // Cpp2IL Unity 6 兼容补丁（源档案可能是未修复版本）
+  try {
+    applyCpp2IlPatch(destBep)
+  } catch {
+    /* 补丁失败不影响档案创建主流程 */
+  }
 
   writeMeta(gameName, gameDir, profileId, {
     name: profileName,
