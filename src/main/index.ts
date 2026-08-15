@@ -15,6 +15,8 @@ import {
 } from './core/library'
 import { listBepInExReleases, installBepInExToLibrary } from './core/installer'
 import { checkForUpdates } from './core/updater'
+import { searchThunderstore, installThunderstorePackage } from './core/thunderstore'
+import type { ThunderstorePackage } from './core/thunderstore'
 import { readLog, LogReadResult } from './core/logparser'
 import {
   migrateToIsolated,
@@ -236,6 +238,16 @@ function registerIpcHandlers(): void {  // 发现游戏（Steam 库 + 手动）
 
   // 检查更新（GitHub Releases）
   ipcMain.handle(IPC.updatesCheck, () => checkForUpdates())
+
+  // ---- Thunderstore 集成 ----
+  ipcMain.handle(IPC.thunderstoreSearch, (_e, query: string) => searchThunderstore(query))
+  ipcMain.handle(
+    IPC.thunderstoreInstall,
+    (_e, gameDir: string, gameName: string, pkg: ThunderstorePackage) =>
+      installThunderstorePackage(gameDir, gameName, pkg, (p) => {
+        BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('thunderstore:install-progress', p))
+      })
+  )
 
   // ---- BepInEx 安装 ----
   ipcMain.handle(IPC.bepinexListReleases, (_e, runtime: 'mono' | 'il2cpp') =>

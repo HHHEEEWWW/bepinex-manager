@@ -193,7 +193,7 @@ async function fetchText(url: string): Promise<string> {
 }
 
 /** 下载 zip 到缓存目录（数据根内 cache/，不散落系统临时目录；带进度回调），返回 zip 路径 */
-async function downloadZip(
+export async function downloadZip(
   assetUrl: string,
   assetName: string,
   onProgress?: ProgressCallback

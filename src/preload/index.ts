@@ -7,7 +7,9 @@ import type {
   IsolatedProfileInfo,
   LibraryAddResult,
   LibraryScanResult,
-  UpdateCheckResult
+  UpdateCheckResult,
+  ThunderstorePackage,
+  ThunderstoreInstallResult
 } from '../shared/types'
 import { IPC } from '../shared/types'
 
@@ -71,6 +73,25 @@ const api = {
   // ---- 更新 ----
   /** 检查更新（GitHub Releases，5 分钟缓存） */
   checkForUpdates: (): Promise<UpdateCheckResult> => ipcRenderer.invoke(IPC.updatesCheck),
+
+  // ---- Thunderstore ----
+  /** 搜索 Thunderstore 包 */
+  thunderstoreSearch: (query: string): Promise<ThunderstorePackage[]> =>
+    ipcRenderer.invoke(IPC.thunderstoreSearch, query),
+  /** 安装 Thunderstore 包（下载 → 入库 → 装入档案） */
+  thunderstoreInstall: (
+    gameDir: string,
+    gameName: string,
+    pkg: ThunderstorePackage
+  ): Promise<ThunderstoreInstallResult> => ipcRenderer.invoke(IPC.thunderstoreInstall, gameDir, gameName, pkg),
+  /** Thunderstore 安装进度事件（返回取消订阅函数） */
+  onThunderstoreProgress: (
+    cb: (p: { phase: string; percent: number; message: string }) => void
+  ): (() => void) => {
+    const listener = (_e: unknown, p: { phase: string; percent: number; message: string }): void => cb(p)
+    ipcRenderer.on('thunderstore:install-progress', listener)
+    return () => ipcRenderer.removeListener('thunderstore:install-progress', listener)
+  },
 
   // ---- BepInEx 安装 ----
   listBepInExReleases: (runtime: 'mono' | 'il2cpp'): Promise<BepInExRelease[]> =>

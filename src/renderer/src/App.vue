@@ -13,7 +13,8 @@ import type {
   LibraryAddResult,
   LibraryScanResult,
   ModInstallItem,
-  UpdateCheckResult
+  UpdateCheckResult,
+  ThunderstorePackage
 } from '@shared/types'
 
 const { message } = createDiscreteApi(['message'], {
@@ -247,6 +248,53 @@ async function checkUpdate(): Promise<void> {
 
 function openUpdateUrl(): void {
   if (updateModal.value?.url) window.open(updateModal.value.url, '_blank')
+}
+
+// ---- Thunderstore 搜索/安装 ----
+const tsModal = ref(false)
+const tsQuery = ref('')
+const tsSearching = ref(false)
+const tsResults = ref<ThunderstorePackage[]>([])
+const tsError = ref('')
+const tsInstalling = ref<{ fullName: string; message: string } | null>(null)
+
+async function tsSearch(): Promise<void> {
+  const q = tsQuery.value.trim()
+  if (!q) return
+  tsSearching.value = true
+  tsError.value = ''
+  tsResults.value = []
+  try {
+    tsResults.value = await window.api.thunderstoreSearch(q)
+    if (!tsResults.value.length) tsError.value = '没有找到匹配的插件，换个关键词试试'
+  } catch (err) {
+    tsError.value = `搜索失败：${(err as Error).message}`
+  } finally {
+    tsSearching.value = false
+  }
+}
+
+async function tsInstall(pkg: ThunderstorePackage): Promise<void> {
+  if (!selectedGame.value) return
+  tsInstalling.value = { fullName: pkg.fullName, message: '准备安装…' }
+  const off = window.api.onThunderstoreProgress((p) => {
+    tsInstalling.value = { fullName: pkg.fullName, message: p.message }
+  })
+  try {
+    const res = await window.api.thunderstoreInstall(selectedGame.value.gameDir, selectedGame.value.name, pkg)
+    if (res.installed.length) {
+      message.success(`已安装 ${res.installed.length} 个插件：${res.installed.join('、')}`)
+    }
+    if (res.skipped.length) {
+      message.warning(`部分条目跳过：${res.skipped.slice(0, 3).join('；')}${res.skipped.length > 3 ? '…' : ''}`)
+    }
+    await refreshAll()
+  } catch (err) {
+    message.error(`安装失败：${(err as Error).message}`)
+  } finally {
+    off()
+    tsInstalling.value = null
+  }
 }
 
 const filteredLogs = computed(() => {
@@ -662,6 +710,14 @@ function displayName(p: PluginInfo): string {
             </button>
             <button class="btn-plain" title="从 GitHub 检查新版本" :disabled="checkingUpdate" @click="checkUpdate">
               {{ checkingUpdate ? '⏳ 检查中…' : '🔄 检查更新' }}
+            </button>
+            <button
+              v-if="selectedGame.bepinex?.isIsolated"
+              class="btn-plain"
+              title="从 Thunderstore 搜索并安装社区插件（自动入库并装入当前档案）"
+              @click="tsModal = true"
+            >
+              🌐 Thunderstore
             </button>
             <button v-if="!selectedGame.bepinex && selectedGame.compatible" class="btn-primary" @click="openInstallModal">
               ⬇ 安装 BepInEx
@@ -1096,6 +1152,60 @@ function displayName(p: PluginInfo): string {
       <div class="dialog-foot">
         <span class="dim">下载安装版后直接覆盖安装，数据（安装目录 data/）会保留</span>
         <button class="btn-primary" @click="openUpdateUrl">⬇ 前往 GitHub 下载</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ Thunderstore 搜索弹窗 ============ -->
+  <div v-if="tsModal" class="mask" @click.self="tsModal = false">
+    <div class="dialog ts-dialog">
+      <div class="dialog-head">
+        <span>🌐 Thunderstore — 社区插件搜索</span>
+        <button class="icon-btn" @click="tsModal = false">✕</button>
+      </div>
+      <div class="ts-search-row">
+        <input
+          v-model="tsQuery"
+          class="profile-input wide"
+          placeholder="搜索插件（如：BepInEx、ModelReplacement…）"
+          @keyup.enter="tsSearch"
+        />
+        <button class="btn-primary" :disabled="tsSearching || !tsQuery.trim()" @click="tsSearch">
+          {{ tsSearching ? '⏳ 搜索中…' : '🔍 搜索' }}
+        </button>
+      </div>
+      <div v-if="tsError" class="error-text ts-error">{{ tsError }}</div>
+      <div class="ts-list">
+        <div v-for="p in tsResults" :key="p.fullName + p.version" class="ts-card">
+          <div class="ts-card-top">
+            <span class="ts-name">{{ p.fullName }}</span>
+            <span class="ver-tag">v{{ p.version }}</span>
+            <span v-if="p.community" class="pill pill-engine" :title="'所属社区'">{{ p.community }}</span>
+          </div>
+          <div class="ts-desc dim" :title="p.description">{{ p.description || '（无描述）' }}</div>
+          <div v-if="p.dependencies.length" class="ts-deps dim mono">
+            依赖：{{ p.dependencies.join(', ') }}
+          </div>
+          <div class="ts-card-foot">
+            <span class="dim" v-if="tsInstalling?.fullName === p.fullName">⏳ {{ tsInstalling.message }}</span>
+            <button
+              v-else
+              class="btn-plain mini"
+              title="下载最新版 → 入库 → 自动装入当前档案"
+              @click="tsInstall(p)"
+            >
+              ⬇ 安装
+            </button>
+            <a class="dim ts-link" :href="p.packageUrl" target="_blank" rel="noopener">详情 ↗</a>
+          </div>
+        </div>
+        <div v-if="!tsSearching && !tsResults.length && !tsError" class="ts-empty dim">
+          输入关键词搜索 Thunderstore 社区插件
+        </div>
+      </div>
+      <div class="dialog-foot">
+        <span class="dim">安装 = 下载最新版 → 入插件库 → 自动装入当前档案；依赖需自行安装</span>
+        <button class="btn-plain" @click="tsModal = false">关闭</button>
       </div>
     </div>
   </div>
@@ -1733,6 +1843,76 @@ function displayName(p: PluginInfo): string {
   max-height: 70vh;
   display: flex;
   flex-direction: column;
+}
+
+/* Thunderstore 搜索弹窗 */
+.ts-dialog {
+  width: min(720px, 92vw);
+  max-height: 78vh;
+  display: flex;
+  flex-direction: column;
+}
+.ts-search-row {
+  display: flex;
+  gap: 10px;
+  padding: 10px 18px 4px;
+}
+.ts-search-row .profile-input {
+  flex: 1;
+}
+.ts-error {
+  padding: 8px 18px 0;
+}
+.ts-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 18px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ts-card {
+  background: #1b1f26;
+  border: 1px solid #272c35;
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ts-card-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ts-name {
+  font-weight: 700;
+  font-size: 13.5px;
+}
+.ts-desc {
+  font-size: 12px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.ts-deps {
+  font-size: 11px;
+}
+.ts-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+.ts-link {
+  font-size: 12px;
+}
+.ts-empty {
+  padding: 30px 10px;
+  text-align: center;
 }
 .update-body {
   flex: 1;

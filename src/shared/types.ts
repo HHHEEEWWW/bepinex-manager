@@ -233,6 +233,34 @@ export interface UpdateCheckResult {
   error: string | null
 }
 
+/** Thunderstore 搜索结果条目 */
+export interface ThunderstorePackage {
+  /** owner-name */
+  fullName: string
+  name: string
+  owner: string
+  /** 最新版本号 */
+  version: string
+  description: string
+  /** 依赖（BepInEx-BepInExPack-x.y.z 格式） */
+  dependencies: string[]
+  /** 最新版本 zip 下载地址 */
+  downloadUrl: string
+  /** 所属游戏社区（第一个） */
+  community: string | null
+  packageUrl: string
+}
+
+/** Thunderstore 安装结果 */
+export interface ThunderstoreInstallResult {
+  /** 已入库并装入档案的条目 */
+  installed: string[]
+  /** 跳过/失败的条目（含原因） */
+  skipped: string[]
+  /** zip 是否成功下载 */
+  downloaded: boolean
+}
+
 /** IPC 通道常量（主进程 ipcMain.handle 与 preload 共用） */
 export const IPC = {
   /** 发现游戏列表 */
@@ -284,5 +312,9 @@ export const IPC = {
   /** 从插件库删除条目（不可恢复；档案副本不受影响） */
   libraryRemove: 'library:remove',
   /** 检查更新（GitHub Releases） */
-  updatesCheck: 'updates:check'
+  updatesCheck: 'updates:check',
+  /** Thunderstore 搜索 */
+  thunderstoreSearch: 'thunderstore:search',
+  /** Thunderstore 安装（下载 → 入库 → 装入档案） */
+  thunderstoreInstall: 'thunderstore:install'
 } as const
