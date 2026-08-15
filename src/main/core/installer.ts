@@ -9,7 +9,7 @@
  *   BepInEx 6:  BepInEx-Unity.IL2CPP-win-x64-6.0.0-pre.2.zip
  *               BepInEx_UnityIL2CPP_x64_6.0.0-pre.1.zip
  */
-import { createWriteStream, readFileSync, statSync, writeFileSync, cpSync } from 'fs'
+import { createWriteStream, readFileSync, writeFileSync, cpSync } from 'fs'
 import { mkdirSync, existsSync, rmSync } from 'fs'
 import { join, dirname } from 'path'
 import { pipeline } from 'stream/promises'
@@ -52,37 +52,24 @@ function asset(tag: string, name: string): { name: string; url: string; size: nu
   return { name, url: `${DOWNLOAD_BASE}/${tag}/${name}`, size: 0 }
 }
 
-/** 列出可用 release（含 pre-release），按游戏运行时过滤资产。带 24h 本地缓存。 */
+/** 列出可用 release（含 pre-release），按游戏运行时过滤资产。BE 构建实时置顶，GitHub 列表带 24h 缓存。 */
 export async function listBepInExReleases(runtime: UnityRuntime): Promise<BepInExRelease[]> {
-  const cacheDir = join(dataRootDir(), 'cache')
-  const cacheFile = join(cacheDir, `releases-${runtime}.json`)
-
-  // 优先读缓存（24h 有效；读缓存同样过滤空资产，兼容旧缓存结构）
-  try {
-    if (existsSync(cacheFile)) {
-      const stat = statSync(cacheFile)
-      if (Date.now() - stat.mtimeMs < 24 * 3600 * 1000) {
-        const cached = JSON.parse(readFileSync(cacheFile, 'utf8')) as BepInExRelease[]
-        return cached.filter((r) => r.assets.length > 0)
-      }
-    }
-  } catch {
-    /* 缓存损坏则忽略 */
-  }
-
   // 通道 0：BepInEx 官方 CI 构建站（Bleeding Edge 最新构建，支持新 Unity metadata）。
-  // 置顶推荐：GitHub Releases 的 6.x 仅有 6.0.0-pre.2（Cpp2IL 只支持 metadata 23-29，
-  // 新游戏 metadata 31 会 InteropManager 初始化失败）。
+  // 实时抓取不缓存（构建每天更新）：GitHub Releases 的 6.x 仅有 6.0.0-pre.2
+  // （Cpp2IL 只支持 metadata 23-29，新游戏 metadata 31 会 InteropManager 初始化失败）。
   const be = await fetchBleedingEdgeBuild(runtime)
+  // 通道 1：GitHub API → 缓存 → 网页 → 内置兜底（函数内部处理缓存）
   const github = await fetchGithubReleases(runtime)
 
   const result = be ? [be, ...github] : github
   if (result.length === 0) return result
 
-  // 写缓存
+  // GitHub 列表写缓存（BE 不缓存）
+  const cacheDir = join(dataRootDir(), 'cache')
+  const cacheFile = join(cacheDir, `releases-${runtime}.json`)
   try {
     mkdirSync(cacheDir, { recursive: true })
-    writeFileSync(cacheFile, JSON.stringify(result), 'utf8')
+    writeFileSync(cacheFile, JSON.stringify(github), 'utf8')
   } catch {
     /* 缓存写入失败不影响功能 */
   }
