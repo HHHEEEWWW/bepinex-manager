@@ -55,12 +55,13 @@ export async function listBepInExReleases(runtime: UnityRuntime): Promise<BepInE
   const cacheDir = join(dataRootDir(), 'cache')
   const cacheFile = join(cacheDir, `releases-${runtime}.json`)
 
-  // 优先读缓存（24h 有效）
+  // 优先读缓存（24h 有效；读缓存同样过滤空资产，兼容旧缓存结构）
   try {
     if (existsSync(cacheFile)) {
       const stat = statSync(cacheFile)
       if (Date.now() - stat.mtimeMs < 24 * 3600 * 1000) {
-        return JSON.parse(readFileSync(cacheFile, 'utf8')) as BepInExRelease[]
+        const cached = JSON.parse(readFileSync(cacheFile, 'utf8')) as BepInExRelease[]
+        return cached.filter((r) => r.assets.length > 0)
       }
     }
   } catch {
@@ -72,7 +73,8 @@ export async function listBepInExReleases(runtime: UnityRuntime): Promise<BepInE
     // 限流/网络失败时：缓存 → GitHub 网页（Atom + expanded_assets，不受 API 限流）→ 内置列表
     try {
       if (existsSync(cacheFile)) {
-        return JSON.parse(readFileSync(cacheFile, 'utf8')) as BepInExRelease[]
+        const cached = JSON.parse(readFileSync(cacheFile, 'utf8')) as BepInExRelease[]
+        return cached.filter((r) => r.assets.length > 0)
       }
     } catch {
       /* 无缓存可用 */
@@ -92,7 +94,7 @@ export async function listBepInExReleases(runtime: UnityRuntime): Promise<BepInE
     assets: Array<{ name: string; browser_download_url: string; size: number }>
   }>
 
-  const result = data.map((r) => filterRelease(r, runtime))
+  const result = data.map((r) => filterRelease(r, runtime)).filter((r) => r.assets.length > 0)
 
   // 写缓存
   try {
@@ -308,14 +310,24 @@ export async function installBepInExToLibrary(
     mkdirSync(dirname(destBep), { recursive: true })
     cpSync(srcBep, destBep, { recursive: true })
 
-    // 2. 注入件 → 游戏目录（仅缺省时复制）
-    for (const inj of ['winhttp.dll', '.doorstop_version']) {
+    // 2. 注入件 → 游戏目录：
+    //    - doorstop_config.ini 用 zip 自带模板（含 [UnityMono]/[Il2Cpp] 完整配置节），随后只改 target
+    //    - winhttp.dll / .doorstop_version 同源复制
+    for (const inj of ['winhttp.dll', '.doorstop_version', 'doorstop_config.ini']) {
       const src = join(tmpDir, inj)
-      const dst = join(gameDir, inj)
-      if (existsSync(src) && !existsSync(dst)) cpSync(src, dst, { force: true })
+      if (!existsSync(src)) continue
+      cpSync(src, join(gameDir, inj), { force: true })
+    }
+    // 3. dotnet/ 运行时目录（BepInEx 6 IL2CPP 加载插件必需：Doorstop 按 coreclr_path=dotnet\coreclr.dll 加载）
+    const srcDotnet = join(tmpDir, 'dotnet')
+    if (existsSync(srcDotnet) && !existsSync(join(gameDir, 'dotnet'))) {
+      cpSync(srcDotnet, join(gameDir, 'dotnet'), { recursive: true })
     }
     if (!existsSync(join(gameDir, 'winhttp.dll'))) {
       throw new Error('压缩包内未包含 winhttp.dll（Doorstop 注入器）')
+    }
+    if (!existsSync(join(gameDir, 'dotnet', 'coreclr.dll'))) {
+      throw new Error('压缩包内未包含 dotnet/coreclr.dll（IL2CPP 运行时），无法建立隔离模式')
     }
 
     // 3. 元数据 + doorstop 指向插件库

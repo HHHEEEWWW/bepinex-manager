@@ -540,7 +540,7 @@ async function doInstall(): Promise<void> {
   try {
     await window.api.installBepInEx(selectedGame.value.gameDir, selectedGame.value.name, asset.url, asset.name)
     installProgress.value = { phase: 'done', percent: 100, message: '安装完成！' }
-    message.success('BepInEx 安装完成（已直装插件库），首次运行游戏将生成配置目录')
+    message.success('BepInEx 安装完成（隔离模式）✓ 游戏目录已注入 winhttp.dll + dotnet 运行时，BepInEx 整树在插件库档案中，从 Steam 启动游戏即生效')
     installBusy.value = false
     showInstallModal.value = false
     await refreshGames()
