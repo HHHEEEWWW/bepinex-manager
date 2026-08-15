@@ -18,6 +18,8 @@
   左栏插件库（选项卡可拖拽，外部 .dll/.zip 拖入即入库），右栏当前档案插件区（库条目拖入=装入档案，
   拖到删除区=从档案移除、库保留）；首次扫描自动把各档案现有插件收集进库（幂等）
 - ✅ **插件管理**：启用/禁用（`plugins` ↔ `plugins-disabled` 目录移动，不污染游戏文件）、GUID 元数据、版本、大小
+- ✅ **Thunderstore 集成**：搜索社区插件（experimental API，不走全量 index），一键安装 = 下载 → 解压入库 →
+  自动装入当前档案（依赖提示、zip 安全校验）
 - ✅ **拖拽安全**：zip 自动解压条目化，路径穿越（zip-slip）/危险可执行文件双重拦截，条目数/大小上限，重名覆盖更新
 - ✅ **元数据解析**：C# 辅助工具（MetadataLoadContext 只读反射，不执行插件代码）批量提取
   `BepInPlugin` / `BepInDependency` 特性 → GUID、名称、版本、依赖清单
@@ -118,14 +120,15 @@ BepInEx 只加载 `BepInEx/plugins/` 下的 dll。本项目将禁用的插件移
 
 ## 路线图
 
-- [x] 打包分发（electron-builder NSIS 安装版 + 便携 zip，元数据工具自包含零依赖）
+- [x] 打包分发（electron-builder NSIS 安装版 + 便携 zip，元数据工具自包含零依赖；升级/卸载保护 data/）
 - [x] **Profile 隔离模式**：Doorstop 方案已落地（`src/main/core/isolation.ts`），
       安装/迁移/切换/删除 + 验证脚本 `scripts/verify-isolation.ts`
 - [x] 插件文件覆盖/重复冲突检测（GUID + 同名文件）
 - [x] LogOutput.log 解析（错误高亮、崩溃定位、增量读取）
 - [x] cfg 结构化编辑（`src/shared/cfgparser.ts`，类型推断 + 表单/文本双视图）
 - [x] BepInEx 一键安装（GitHub release 多级回退下载 + 24h 缓存，直装插件库）
-- [ ] Thunderstore 搜索/安装集成（生态集成，最后阶段）
+- [x] **Thunderstore 搜索/安装集成**（`src/main/core/thunderstore.ts`，下载 → 入库 → 装入档案）
+- [x] 应用图标、检查更新（多级回退）、缓存目录分离（.userdata）
 
 ## r2modman 调研结论（已落地/待落地）
 
