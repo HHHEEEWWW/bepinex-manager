@@ -1,6 +1,6 @@
 import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join, dirname } from 'path'
-import { readFileSync, writeFileSync, statSync, mkdirSync } from 'fs'
+import { readFileSync, writeFileSync, statSync, mkdirSync, rmSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { IPC } from '@shared/types'
 import { discoverGames, addManualGame } from './core/games'
@@ -14,6 +14,7 @@ import {
   removeLibraryEntry
 } from './core/library'
 import { listBepInExReleases, installBepInExToLibrary } from './core/installer'
+import { planUninstall, pruneGameLibrary, libraryRoot } from './core/uninstaller'
 import { checkForUpdates, downloadUpdate, applyUpdate } from './core/updater'
 import { searchThunderstore, installThunderstorePackage } from './core/thunderstore'
 import type { ThunderstorePackage } from './core/thunderstore'
@@ -275,6 +276,39 @@ function registerIpcHandlers(): void {  // 发现游戏（Steam 库 + 手动）
       })
     }
   )
+
+  // 卸载 BepInEx（还原游戏目录为未安装状态）
+  ipcMain.handle(IPC.bepinexUninstall, async (_e, gameDir: string, gameName: string, opts?: { purge?: boolean }) => {
+    const purge = opts?.purge === true
+    const targets = planUninstall(gameDir, gameName)
+    const removed: string[] = []
+    const failed: Array<{ path: string; reason: string }> = []
+    for (const t of targets) {
+      try {
+        if (purge) {
+          rmSync(t.path, { recursive: true, force: true })
+        } else {
+          // 回收站：可还原；目录/文件被占用时抛错，逐项收集
+          await shell.trashItem(t.path)
+        }
+        removed.push(t.path)
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err)
+        failed.push({ path: t.path, reason })
+      }
+    }
+
+    // 隔离模式：档案清空后顺手删掉插件库中的空游戏目录壳
+    if (!failed.some((f) => f.path.startsWith(libraryRoot()))) {
+      try {
+        pruneGameLibrary(gameDir, gameName)
+      } catch {
+        /* best-effort */
+      }
+    }
+
+    return { removed, failed, mode: purge ? ('purge' as const) : ('trash' as const) }
+  })
 }
 
 /** 日志文件当前大小（不存在返回 0），用于记录增量偏移 */

@@ -3,6 +3,8 @@ import type {
   GameEntry,
   GameScanResult,
   BepInExRelease,
+  BepInExUninstallOptions,
+  BepInExUninstallResult,
   LogReadResult,
   IsolatedProfileInfo,
   LibraryAddResult,
@@ -113,6 +115,12 @@ const api = {
     ipcRenderer.invoke(IPC.bepinexListReleases, runtime),
   installBepInEx: (gameDir: string, gameName: string, assetUrl: string, assetName: string): Promise<{ profileId: string; target: string }> =>
     ipcRenderer.invoke(IPC.bepinexInstall, gameDir, gameName, assetUrl, assetName),
+  /** 卸载 BepInEx（默认移入回收站；purge=true 彻底删除），返回逐项结果 */
+  uninstallBepInEx: (
+    gameDir: string,
+    gameName: string,
+    opts?: BepInExUninstallOptions
+  ): Promise<BepInExUninstallResult> => ipcRenderer.invoke(IPC.bepinexUninstall, gameDir, gameName, opts),
   /** 安装进度事件（返回取消订阅函数） */
   onInstallProgress: (
     cb: (p: { phase: string; percent: number; message: string }) => void

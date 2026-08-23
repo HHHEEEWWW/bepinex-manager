@@ -607,6 +607,45 @@ function fmtSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
+// ---- BepInEx 卸载 ----
+const showUninstallModal = ref(false)
+const uninstallPurge = ref(false)
+const uninstallBusy = ref(false)
+
+function openUninstallModal(): void {
+  if (!selectedGame.value?.bepinex) return
+  uninstallPurge.value = false
+  uninstallBusy.value = false
+  showUninstallModal.value = true
+}
+
+/** 执行卸载：默认移入回收站（可还原），勾选后彻底删除 */
+async function doUninstall(): Promise<void> {
+  if (!selectedGame.value || uninstallBusy.value) return
+  uninstallBusy.value = true
+  try {
+    const res = await window.api.uninstallBepInEx(selectedGame.value.gameDir, selectedGame.value.name, {
+      purge: uninstallPurge.value
+    })
+    showUninstallModal.value = false
+    if (res.failed.length > 0) {
+      message.warning(
+        `已移除 ${res.removed.length} 项，${res.failed.length} 项失败（文件可能被游戏占用）。请关闭游戏后重新执行卸载即可补完。`
+      )
+    } else if (res.mode === 'purge') {
+      message.success('BepInEx 已彻底卸载，游戏已还原为未安装状态')
+    } else {
+      message.success('BepInEx 已卸载（项目移入了系统回收站，误删可还原），游戏已还原为未安装状态')
+    }
+    await refreshGames()
+  } catch (e) {
+    message.error(`卸载失败: ${e}`)
+  } finally {
+    uninstallBusy.value = false
+  }
+}
+
+
 // ---- 日志操作 ----
 async function openLogModal(): Promise<void> {
   if (!selectedGame.value) return
@@ -766,6 +805,14 @@ function displayName(p: PluginInfo): string {
             >
               🌐 Thunderstore
             </button>
+            <button
+              v-if="selectedGame.bepinex"
+              class="btn-plain uninstall-btn"
+              title="卸载 BepInEx：移除注入件与框架数据，游戏还原为未安装状态"
+              @click="openUninstallModal"
+            >
+              🗑 卸载
+            </button>
             <button v-if="!selectedGame.bepinex && selectedGame.compatible" class="btn-primary" @click="openInstallModal">
               ⬇ 安装 BepInEx
             </button>
@@ -797,12 +844,15 @@ function displayName(p: PluginInfo): string {
           <div class="center-text dim">
             管理器只提供隔离模式（插件库）。一键迁入后即可在此管理插件、配置与档案。
           </div>
-          <button
-            class="btn-primary big"
-            @click="isolateModal = { show: true, mode: 'migrate', name: '', busy: false, error: '' }"
-          >
-            📦 迁入插件库
-          </button>
+          <div class="center-actions">
+            <button
+              class="btn-primary big"
+              @click="isolateModal = { show: true, mode: 'migrate', name: '', busy: false, error: '' }"
+            >
+              📦 迁入插件库
+            </button>
+            <button class="btn-plain big uninstall-btn" @click="openUninstallModal">🗑 卸载 BepInEx</button>
+          </div>
         </div>
 
         <!-- 扫描中 -->
@@ -1383,6 +1433,43 @@ function displayName(p: PluginInfo): string {
           </div>
         </template>
       </template>
+    </div>
+  </div>
+
+  <!-- ============ BepInEx 卸载弹窗 ============ -->
+  <div v-if="showUninstallModal" class="mask" @click.self="showUninstallModal = false">
+    <div class="dialog small-dialog">
+      <div class="dialog-head">
+        <span>🗑 卸载 BepInEx — {{ selectedGame?.name }}</span>
+        <button class="icon-btn" @click="showUninstallModal = false">✕</button>
+      </div>
+
+      <div class="isolate-body">
+        <p>将移除以下内容，把游戏还原为<b>未安装 BepInEx</b> 的状态：</p>
+        <ul class="uninstall-list">
+          <li>注入件：winhttp.dll、doorstop_config.ini、.doorstop_version（游戏目录）</li>
+          <li v-if="selectedGame?.bepinex?.isIsolated">
+            插件库中该游戏的<b>全部档案</b>（框架 + 已装插件 + 配置）
+          </li>
+          <li v-else>BepInEx 主目录 <b>{{ selectedGame?.gameDir }}\BepInEx\</b>（框架 + 插件 + 配置）</li>
+          <li>随附的 dotnet/ 运行时目录（若存在）</li>
+        </ul>
+        <label class="uninstall-opt">
+          <input v-model="uninstallPurge" type="checkbox" />
+          <span>彻底删除（不进回收站，<b class="danger-text">不可恢复</b>）</span>
+        </label>
+        <p class="dim">默认移入系统回收站，误删可还原。卸载前请先关闭游戏，否则文件被占用会部分失败。</p>
+      </div>
+
+      <div class="dialog-foot">
+        <span></span>
+        <div class="foot-btns">
+          <button class="btn-plain" @click="showUninstallModal = false">取消</button>
+          <button class="btn-danger" :disabled="uninstallBusy" @click="doUninstall">
+            {{ uninstallBusy ? '卸载中…' : uninstallPurge ? '彻底删除' : '卸载（进回收站）' }}
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -2202,6 +2289,76 @@ function displayName(p: PluginInfo): string {
 .btn-plain:hover {
   border-color: #4c9aff;
   color: #4c9aff;
+}
+
+/* 危险操作（卸载） */
+.uninstall-btn:hover {
+  border-color: #f87171 !important;
+  color: #f87171 !important;
+}
+.btn-danger {
+  border: none;
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  color: #fff;
+  border-radius: 8px;
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 0.12s ease, transform 0.06s ease;
+  box-shadow: 0 3px 12px rgba(220, 38, 38, 0.3);
+}
+.btn-danger:hover {
+  filter: brightness(1.1);
+}
+.btn-danger:active {
+  transform: scale(0.98);
+}
+.btn-danger:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.btn-plain.big {
+  padding: 11px 22px;
+  font-size: 14px;
+}
+
+/* 卸载弹窗 */
+.center-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+}
+.uninstall-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  line-height: 1.9;
+  color: #c9d1dc;
+  word-break: break-all;
+}
+.uninstall-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  cursor: pointer;
+  user-select: none;
+  padding: 8px 10px;
+  border: 1px dashed #3a3f4b;
+  border-radius: 8px;
+}
+.uninstall-opt input {
+  accent-color: #ef4444;
+}
+.danger-text {
+  color: #f87171;
+}
+.foot-btns {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 .icon-btn {
   border: none;

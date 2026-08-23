@@ -121,6 +121,28 @@ export interface BepInExRelease {
   assets: BepInExReleaseAsset[]
 }
 
+/** BepInEx 卸载选项 */
+export interface BepInExUninstallOptions {
+  /** true = 彻底删除（不进回收站，不可恢复）；缺省 false = 移入系统回收站（可还原） */
+  purge?: boolean
+}
+
+/** 单项卸载失败（多为文件被游戏占用） */
+export interface UninstallFailure {
+  path: string
+  reason: string
+}
+
+/** BepInEx 卸载结果 */
+export interface BepInExUninstallResult {
+  /** 已成功移除的路径列表（注入件、dotnet 运行时、BepInEx 数据树） */
+  removed: string[]
+  /** 移除失败的项（文件被占用等；关闭游戏后可再次执行补完） */
+  failed: UninstallFailure[]
+  /** 本次移除方式：trash = 移入回收站；purge = 彻底删除 */
+  mode: 'trash' | 'purge'
+}
+
 /** 安装进度 */
 export interface InstallProgress {
   phase: 'fetch' | 'download' | 'extract' | 'done' | 'error'
@@ -304,6 +326,8 @@ export const IPC = {
   bepinexListReleases: 'bepinex:list-releases',
   /** 安装 BepInEx */
   bepinexInstall: 'bepinex:install',
+  /** 卸载 BepInEx（还原游戏目录为未安装状态） */
+  bepinexUninstall: 'bepinex:uninstall',
   /** 读取游戏日志（offset=0 全量） */
   logsRead: 'logs:read',
   /** 读取日志增量（自上次读取以来） */
