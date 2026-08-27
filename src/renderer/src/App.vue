@@ -254,7 +254,7 @@ function openUpdateUrl(): void {
   if (updateModal.value?.url) window.open(updateModal.value.url, '_blank')
 }
 
-/** 应用内下载安装包（安装版）：下载 → 确认 → 静默安装并重启 */
+/** 应用内下载安装包（安装版）：下载 → 确认 → 运行安装向导 */
 async function downloadAndUpdate(): Promise<void> {
   const res = updateModal.value
   if (!res || !res.setupUrl) {
@@ -280,11 +280,11 @@ async function downloadAndUpdate(): Promise<void> {
     updateDownloadMsg.value = '下载完成，准备安装…'
     updateUnsub?.()
     updateUnsub = null
-    // 确认后静默安装（安装器会自动重启应用）
+    // 确认后运行安装包（显式安装向导，用户手动完成）
     const ok = await window.api.applyUpdate(dl.setupPath)
     if (ok.ok) {
       updateModal.value = null
-      message.success('安装器已启动，应用即将退出并在安装完成后自动重启')
+      message.success(`安装器已启动，请按向导完成升级。安装路径: ${ok.message.split(': ')[1] || '默认'}`)
     } else {
       updateDownloading.value = false
       message.error(`自动升级失败：${ok.message}`)

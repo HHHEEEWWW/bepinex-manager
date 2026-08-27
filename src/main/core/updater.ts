@@ -257,8 +257,8 @@ export async function downloadUpdate(
 }
 
 /**
- * 应用更新：NSIS 静默安装已下载的 setup.exe 到当前安装目录，然后退出并重启。
- * 通过 detached powershell 完成「等待退出 → 静默安装 → 启动新版」，本进程立即退出。
+ * 应用更新：运行 setup.exe 安装包，自动选择当前安装路径。
+ * 用户手动完成安装向导后，自行决定是否重启应用。
  */
 export function applyUpdate(setupPath: string): UpdateApplyResult {
   if (!isInstalledBuild()) {
@@ -269,18 +269,14 @@ export function applyUpdate(setupPath: string): UpdateApplyResult {
   }
   const exePath = app.getPath('exe')
   const installDir = dirname(exePath)
-  const script =
-    `Start-Sleep -Seconds 2; ` +
-    `Start-Process -FilePath '${setupPath.replace(/'/g, "''")}' -ArgumentList '/S','/D=${installDir.replace(/'/g, "''")}' -Wait; ` +
-    `Start-Process -FilePath '${exePath.replace(/'/g, "''")}'`
   try {
-    const child = spawn('powershell', ['-NoProfile', '-Command', script], {
+    // 直接运行安装包，/D= 指定默认安装路径（用户可在向导中修改）
+    spawn(setupPath, [`/D=${installDir}`], {
       detached: true,
       stdio: 'ignore',
-      windowsHide: true
-    })
-    child.unref()
-    return { ok: true, message: '安装器已启动，应用即将退出并在安装完成后自动重启' }
+      windowsHide: false
+    }).unref()
+    return { ok: true, message: `安装器已启动，安装路径: ${installDir}` }
   } catch (e) {
     return { ok: false, message: `启动安装器失败: ${(e as Error).message}` }
   }
