@@ -129,6 +129,7 @@ BepInEx 只加载 `BepInEx/plugins/` 下的 dll。本项目将禁用的插件移
 - [x] BepInEx 一键安装（GitHub release 多级回退下载 + 24h 缓存，直装插件库）
 - [x] **Thunderstore 搜索/安装集成**（`src/main/core/thunderstore.ts`，下载 → 入库 → 装入档案）
 - [x] 应用图标、检查更新（多级回退）、缓存目录分离（.userdata）
+- [x] **Mono/IL2CPP 自动检测修复**：未安装 BepInEx 的游戏现在能根据引擎检测结果（`detectEngine`）正确选择 Mono 或 IL2CPP 版本
 
 ## r2modman 调研结论（已落地/待落地）
 

@@ -558,7 +558,9 @@ async function openInstallModal(): Promise<void> {
   loadingReleases.value = true
   releases.value = []
   try {
-    const runtime = selectedGame.value?.bepinex?.isMono ? 'mono' : 'il2cpp'
+    const game = selectedGame.value
+    const isMono = game?.bepinex?.isMono ?? game?.engine?.includes('Mono') ?? false
+    const runtime: 'mono' | 'il2cpp' = isMono ? 'mono' : 'il2cpp'
     releases.value = await window.api.listBepInExReleases(runtime)
     if (releases.value.length === 0) {
       message.warning('没有可用版本，请稍后重试')
