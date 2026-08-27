@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
 import { createDiscreteApi, darkTheme } from 'naive-ui'
+import SettingsModal from './components/SettingsModal.vue'
 import { parseCfg, serializeCfg, type CfgDocument } from '@shared/cfgparser'
 import type {
   GameEntry,
@@ -60,6 +61,9 @@ const isolateModal = ref<{
   busy: boolean
   error: string
 } | null>(null)
+
+// ---- 设置弹窗 ----
+const showSettings = ref(false)
 
 // ---- MOD 拖拽安装 ----
 const libBusy = ref(false)
@@ -342,6 +346,10 @@ async function tsInstall(pkg: ThunderstorePackage): Promise<void> {
     off()
     tsInstalling.value = null
   }
+}
+
+async function handleTsInstallFromSettings(pkg: ThunderstorePackage): Promise<void> {
+  await tsInstall(pkg)
 }
 
 const filteredLogs = computed(() => {
@@ -752,6 +760,10 @@ function displayName(p: PluginInfo): string {
 
       <div class="sidebar-foot">
         <button class="add-btn" @click="addManualGame">＋ 手动添加游戏目录</button>
+        <button class="settings-btn" @click="showSettings = true">
+          <span class="settings-icon">⚙️</span>
+          <span>设置</span>
+        </button>
       </div>
     </aside>
 
@@ -792,20 +804,6 @@ function displayName(p: PluginInfo): string {
               @click="isolateModal = { show: true, mode: 'migrate', name: '', busy: false, error: '' }"
             >
               📦 迁入插件库
-            </button>
-            <button v-if="selectedGame.bepinex" class="btn-plain" title="查看 BepInEx 运行日志" @click="openLogModal">
-              📋 日志
-            </button>
-            <button class="btn-plain" title="从 GitHub 检查新版本" :disabled="checkingUpdate" @click="checkUpdate">
-              {{ checkingUpdate ? '⏳ 检查中…' : '🔄 检查更新' }}
-            </button>
-            <button
-              v-if="selectedGame.bepinex?.isIsolated"
-              class="btn-plain"
-              title="从 Thunderstore 搜索并安装社区插件（自动入库并装入当前档案）"
-              @click="tsModal = true"
-            >
-              🌐 Thunderstore
             </button>
             <button
               v-if="selectedGame.bepinex"
@@ -1474,6 +1472,14 @@ function displayName(p: PluginInfo): string {
       </div>
     </div>
   </div>
+
+  <!-- ============ 设置弹窗 ============ -->
+  <SettingsModal
+    v-if="showSettings"
+    :game="selectedGame"
+    @close="showSettings = false"
+    @ts-install="handleTsInstallFromSettings"
+  />
 </template>
 
 <style scoped>
@@ -1586,6 +1592,33 @@ function displayName(p: PluginInfo): string {
   border-color: #4c9aff;
   color: #4c9aff;
   background: rgba(76, 154, 255, 0.06);
+}
+
+.settings-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px;
+  margin-top: 8px;
+  border-radius: 8px;
+  border: 1px solid #3a3f4b;
+  background: rgba(255, 255, 255, 0.03);
+  color: #9aa4b2;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.settings-btn:hover {
+  background: rgba(76, 154, 255, 0.1);
+  border-color: #4c9aff;
+  color: #e5e9f0;
+}
+
+.settings-icon {
+  font-size: 16px;
 }
 
 /* ============ 徽章 ============ */
