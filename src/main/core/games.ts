@@ -10,7 +10,7 @@
 import { execFileSync } from 'child_process'
 import { existsSync, readdirSync, readFileSync, openSync, readSync, closeSync } from 'fs'
 import { join } from 'path'
-import type { GameEntry } from '@shared/types'
+import type { GameEntry, UnityRuntime } from '@shared/types'
 import { detectBepInEx } from './bepinex'
 
 interface AcfEntry {
@@ -38,6 +38,11 @@ export function discoverGames(): GameEntry[] {
         if (seen.has(key)) continue
         seen.add(key)
         const bepinex = detectBepInEx(gameDir)
+        const detectedRuntime = bepinex
+          ? bepinex.isMono
+            ? ('mono' as const)
+            : ('il2cpp' as const)
+          : detectUnityRuntime(gameDir)
         games.push({
           id: hashId(gameDir),
           name: entry.name,
@@ -46,7 +51,8 @@ export function discoverGames(): GameEntry[] {
           steamAppId: entry.appid,
           bepinex,
           compatible: bepinex !== null || isBepInExCompatible(gameDir),
-          engine: bepinex ? (bepinex.isMono ? 'Unity (Mono)' : 'Unity (IL2CPP)') : detectEngine(gameDir)
+          engine: bepinex ? (bepinex.isMono ? 'Unity (Mono)' : 'Unity (IL2CPP)') : detectEngine(gameDir),
+          runtime: detectedRuntime
         })
       }
     }
@@ -57,39 +63,37 @@ export function discoverGames(): GameEntry[] {
 /** 手动添加一个游戏目录 */
 export function addManualGame(gameDir: string): GameEntry {
   const name = gameDir.split(/[\\/]/).filter(Boolean).pop() ?? gameDir
+  const bepinex = detectBepInEx(gameDir)
   return {
     id: hashId(gameDir),
     name,
     gameDir,
     source: 'manual',
-    bepinex: detectBepInEx(gameDir),
+    bepinex,
     compatible: true, // 用户手动指定的目录始终显示
-    engine: null
+    engine: bepinex ? (bepinex.isMono ? 'Unity (Mono)' : 'Unity (IL2CPP)') : detectEngine(gameDir),
+    runtime: bepinex ? (bepinex.isMono ? 'mono' : 'il2cpp') : detectUnityRuntime(gameDir)
   }
 }
 
 /**
  * 引擎支持性检测：判断游戏是否可能支持 BepInEx。
- * 判定顺序：Doorstop 注入件 → Unity IL2CPP → Unity Mono → .NET 可执行程序集
+ * 判定顺序：Unity IL2CPP → Unity Mono → Doorstop 注入件 → .NET 可执行程序集
  */
 export function detectEngine(gameDir: string): string | null {
-  // Doorstop 已注入
+  // Unity IL2CPP：
+  //   - GameAssembly.dll 是 IL2CPP 用户代码的原生程序集，出现即 IL2CPP
+  //   - global-metadata.dat 可能在游戏根目录，也可能在 <X>_Data/il2cpp_data/Metadata/ 下
+  if (existsSync(join(gameDir, 'GameAssembly.dll'))) return 'Unity (IL2CPP)'
+  if (findIl2CppMetadata(gameDir)) return 'Unity (IL2CPP)'
+  // Unity Mono：<X>_Data/Managed/Assembly-CSharp.dll 是最可靠信号；
+  // MonoBleedingEdge 目录、单独 UnityPlayer.dll 在排除 IL2CPP 特征后也视为 Mono。
+  if (findManagedAssemblyCSharp(gameDir)) return 'Unity (Mono)'
+  if (existsSync(join(gameDir, 'MonoBleedingEdge'))) return 'Unity (Mono)'
+  if (existsSync(join(gameDir, 'UnityPlayer.dll'))) return 'Unity (Mono)'
+  // Doorstop 已注入（无引擎特征时作为兼容提示）
   if (existsSync(join(gameDir, 'winhttp.dll')) && existsSync(join(gameDir, 'doorstop_config.ini'))) {
     return 'Doorstop 已注入'
-  }
-  // Unity IL2CPP：GameAssembly.dll + global-metadata.dat
-  if (existsSync(join(gameDir, 'GameAssembly.dll')) && existsSync(join(gameDir, 'global-metadata.dat'))) {
-    return 'Unity (IL2CPP)'
-  }
-  // Unity Mono：<X>_Data/Managed/Assembly-CSharp.dll 或 UnityPlayer.dll
-  if (existsSync(join(gameDir, 'UnityPlayer.dll'))) return 'Unity (Mono)'
-  try {
-    const dataDirs = readdirSync(gameDir).filter((d) => d.endsWith('_Data'))
-    for (const d of dataDirs) {
-      if (existsSync(join(gameDir, d, 'Managed', 'Assembly-CSharp.dll'))) return 'Unity (Mono)'
-    }
-  } catch {
-    /* 目录不可读则跳过 */
   }
   // .NET 可执行程序集（XNA/MonoGame 或任何托管 exe）
   try {
@@ -101,6 +105,49 @@ export function detectEngine(gameDir: string): string | null {
   } catch {
     /* 忽略 */
   }
+  return null
+}
+
+/** 查找 IL2CPP metadata 文件（根目录或各 *_Data 目录下） */
+function findIl2CppMetadata(gameDir: string): string | null {
+  const rootMeta = join(gameDir, 'global-metadata.dat')
+  if (existsSync(rootMeta)) return rootMeta
+  try {
+    for (const d of readdirSync(gameDir)) {
+      if (!d.endsWith('_Data')) continue
+      const candidates = [
+        join(gameDir, d, 'il2cpp_data', 'Metadata', 'global-metadata.dat'),
+        join(gameDir, d, 'global-metadata.dat')
+      ]
+      for (const p of candidates) {
+        if (existsSync(p)) return p
+      }
+    }
+  } catch {
+    /* 目录不可读则跳过 */
+  }
+  return null
+}
+
+/** 查找 Unity Mono 托管主程序集 */
+function findManagedAssemblyCSharp(gameDir: string): string | null {
+  try {
+    for (const d of readdirSync(gameDir)) {
+      if (!d.endsWith('_Data')) continue
+      const p = join(gameDir, d, 'Managed', 'Assembly-CSharp.dll')
+      if (existsSync(p)) return p
+    }
+  } catch {
+    /* 目录不可读则跳过 */
+  }
+  return null
+}
+
+/** 检测 Unity 运行时：'mono' | 'il2cpp'；非 Unity/无法识别返回 null */
+export function detectUnityRuntime(gameDir: string): UnityRuntime | null {
+  const engine = detectEngine(gameDir)
+  if (engine?.includes('IL2CPP')) return 'il2cpp'
+  if (engine?.includes('Mono')) return 'mono'
   return null
 }
 

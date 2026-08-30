@@ -98,7 +98,7 @@ const tsInstalling = ref<{ fullName: string; message: string } | null>(null)
 async function loadLog(): Promise<void> {
   if (!props.game) return
   try {
-    logData.value = await window.api.readLog(props.game.gameDir, 0)
+    logData.value = await window.api.readLog(props.game.gameDir)
   } catch {
     logData.value = null
   }
@@ -321,7 +321,7 @@ function selectGroup(key: SettingsGroup): void {
                   <div class="status-text">
                     发现新版本 <strong>v{{ updateResult.latest }}</strong>
                   </div>
-                  <a class="btn-download" :href="updateResult.url" target="_blank">
+                  <a v-if="updateResult.url" class="btn-download" :href="updateResult.url" target="_blank">
                     前往下载
                   </a>
                 </template>

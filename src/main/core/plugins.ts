@@ -56,7 +56,8 @@ export function scanPlugins(bepinex: BepInExInfo): GameScanResult {
       source: 'manual',
       bepinex,
       compatible: true,
-      engine: bepinex.isMono ? 'Unity (Mono)' : 'Unity (IL2CPP)'
+      engine: bepinex.isMono ? 'Unity (Mono)' : 'Unity (IL2CPP)',
+      runtime: bepinex.isMono ? 'mono' : 'il2cpp'
     },
     plugins: all,
     hasDisabledDir: existsSync(disabledDir),
