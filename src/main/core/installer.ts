@@ -441,7 +441,8 @@ export async function installBepInExToLibrary(
       if (!existsSync(src)) continue
       cpSync(src, join(gameDir, inj), { force: true })
     }
-    // 3. dotnet/ 运行时目录（BepInEx 6 IL2CPP 加载插件必需：Doorstop 按 coreclr_path=dotnet\coreclr.dll 加载）
+    // 3. dotnet/ 运行时目录（BepInEx 6 需要：Doorstop 按 coreclr_path=dotnet\coreclr.dll 加载；
+    //    BepInEx 5 Mono 包没有 dotnet/，不应强制要求）
     const srcDotnet = join(tmpDir, 'dotnet')
     if (existsSync(srcDotnet) && !existsSync(join(gameDir, 'dotnet'))) {
       cpSync(srcDotnet, join(gameDir, 'dotnet'), { recursive: true })
@@ -449,8 +450,10 @@ export async function installBepInExToLibrary(
     if (!existsSync(join(gameDir, 'winhttp.dll'))) {
       throw new Error('压缩包内未包含 winhttp.dll（Doorstop 注入器）')
     }
-    if (!existsSync(join(gameDir, 'dotnet', 'coreclr.dll'))) {
-      throw new Error('压缩包内未包含 dotnet/coreclr.dll（IL2CPP 运行时），无法建立隔离模式')
+    const needsDotnet =
+      existsSync(join(srcBep, 'core', 'BepInEx.Core.dll')) || existsSync(join(srcBep, 'interop'))
+    if (needsDotnet && !existsSync(join(gameDir, 'dotnet', 'coreclr.dll'))) {
+      throw new Error('压缩包内未包含 dotnet/coreclr.dll（BepInEx 6 运行时），无法建立隔离模式')
     }
 
     // 3.5. Cpp2IL Unity 6 兼容补丁（sanity limit 0xC0000 → 0x400000）：
