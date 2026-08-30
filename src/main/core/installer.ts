@@ -240,6 +240,50 @@ async function fetchText(url: string): Promise<string> {
   return res.text()
 }
 
+/** GitHub Release 下载加速镜像前缀（原 URL 直接拼在后面），用于直连失败时自动回退 */
+const GITHUB_MIRROR_PREFIXES = [
+  'https://gh-proxy.com/',
+  'https://ghproxy.net/',
+  'https://ghproxy.homeboyc.cn/',
+  'https://mirror.ghproxy.com/',
+  'https://ghproxy.1888866.xyz/'
+] as const
+
+/** BepInEx 官方 CI 构建站下载失败时，回退到 GitHub 同类型正式/预发布资产 */
+function githubFallbackForBuild(assetName: string): string | null {
+  const lower = assetName.toLowerCase()
+  if (lower.includes('il2cpp')) {
+    return 'https://github.com/BepInEx/BepInEx/releases/download/v6.0.0-pre.2/BepInEx-Unity.IL2CPP-win-x64-6.0.0-pre.2.zip'
+  }
+  if (lower.includes('mono')) {
+    return 'https://github.com/BepInEx/BepInEx/releases/download/v6.0.0-pre.2/BepInEx-Unity.Mono-win-x64-6.0.0-pre.2.zip'
+  }
+  if (/^bepinex_win_x64/i.test(assetName)) {
+    return 'https://github.com/BepInEx/BepInEx/releases/download/v5.4.23.5/BepInEx_win_x64_5.4.23.5.zip'
+  }
+  return null
+}
+
+/** 生成下载候选地址：原地址优先，GitHub Release 再追加镜像地址 */
+function downloadCandidates(assetUrl: string, assetName: string): string[] {
+  const candidates = [assetUrl]
+  if (/^https:\/\/github\.com\//i.test(assetUrl)) {
+    for (const prefix of GITHUB_MIRROR_PREFIXES) {
+      candidates.push(prefix + assetUrl)
+    }
+  } else if (/^https:\/\/builds\.bepinex\.dev\//i.test(assetUrl)) {
+    // 官方 CI 直连失败时，回退到 GitHub 同类型资产；GitHub 资产再追加镜像
+    const gh = githubFallbackForBuild(assetName)
+    if (gh) {
+      candidates.push(gh)
+      for (const prefix of GITHUB_MIRROR_PREFIXES) {
+        candidates.push(prefix + gh)
+      }
+    }
+  }
+  return candidates
+}
+
 /** 下载 zip 到缓存目录（数据根内 cache/，不散落系统临时目录；带进度回调），返回 zip 路径 */
 export async function downloadZip(
   assetUrl: string,
@@ -249,30 +293,63 @@ export async function downloadZip(
   const cacheDir = join(dataRootDir(), 'cache')
   mkdirSync(cacheDir, { recursive: true })
   const zipPath = join(cacheDir, assetName)
+  const candidates = downloadCandidates(assetUrl, assetName)
 
-  onProgress?.({ phase: 'download', percent: 0, message: '下载中…' })
-  const res = await fetch(assetUrl, {
-    headers: { 'User-Agent': 'bepinex-manager', Accept: 'application/octet-stream' },
-    redirect: 'follow'
-  })
-  if (!res.ok) throw new Error(`下载失败: HTTP ${res.status}`)
-  const total = Number(res.headers.get('content-length') ?? 0)
-  let received = 0
-  const ws = createWriteStream(zipPath)
-  await pipeline(
-    Readable.fromWeb(res.body as never).on('data', (chunk: Buffer) => {
-      received += chunk.length
-      if (total > 0) {
-        onProgress?.({
-          phase: 'download',
-          percent: Math.round((received / total) * 80),
-          message: `下载中… ${Math.round((received / total) * 100)}%`
-        })
+  let lastErr: unknown = null
+  for (let i = 0; i < candidates.length; i++) {
+    const url = candidates[i]
+    // 清理上一次可能残留的半截文件
+    try {
+      rmSync(zipPath, { force: true })
+    } catch {
+      /* ignore */
+    }
+
+    try {
+      onProgress?.({
+        phase: 'download',
+        percent: 0,
+        message: i === 0 ? '下载中…' : `下载中…（镜像 ${i}）`
+      })
+      const res = await fetch(url, {
+        headers: { 'User-Agent': 'bepinex-manager', Accept: 'application/octet-stream' },
+        redirect: 'follow'
+      })
+      if (!res.ok) {
+        lastErr = new Error(`HTTP ${res.status}`)
+        continue
       }
-    }),
-    ws
-  )
-  return zipPath
+      const total = Number(res.headers.get('content-length') ?? 0)
+      let received = 0
+      const ws = createWriteStream(zipPath)
+      await pipeline(
+        Readable.fromWeb(res.body as never).on('data', (chunk: Buffer) => {
+          received += chunk.length
+          if (total > 0) {
+            onProgress?.({
+              phase: 'download',
+              percent: Math.round((received / total) * 80),
+              message: `下载中… ${Math.round((received / total) * 100)}%`
+            })
+          }
+        }),
+        ws
+      )
+      return zipPath
+    } catch (e) {
+      lastErr = e
+      try {
+        rmSync(zipPath, { force: true })
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  const hint = /github\.com|builds\.bepinex\.dev/i.test(assetUrl)
+    ? '（直连与镜像/备用源均失败，请检查网络后重试）'
+    : '（请检查网络后重试）'
+  throw new Error(`下载失败: ${lastErr instanceof Error ? lastErr.message : String(lastErr)} ${hint}`)
 }
 
 /** 解压 zip 到指定目录（PowerShell Expand-Archive，避免额外依赖） */
