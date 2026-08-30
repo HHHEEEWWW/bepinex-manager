@@ -36,6 +36,16 @@ const selectedAssetIndex = ref(0)
 const installProgress = ref<{ phase: string; percent: number; message: string } | null>(null)
 const installBusy = ref(false)
 
+/** 安装 BepInEx 时的运行时选择：自动检测 / Mono / IL2CPP */
+type InstallRuntimeChoice = 'auto' | 'mono' | 'il2cpp'
+const installRuntimeChoice = ref<InstallRuntimeChoice>('auto')
+const installRuntimeDetected = ref<'mono' | 'il2cpp' | null>(null)
+const installRuntimeWarning = ref('')
+const installRuntime = computed<'mono' | 'il2cpp' | null>(() => {
+  if (installRuntimeChoice.value === 'auto') return installRuntimeDetected.value
+  return installRuntimeChoice.value
+})
+
 // ---- 配置编辑器 ----
 const configEditor = ref<{
   plugin: PluginInfo
@@ -229,30 +239,11 @@ async function openLibraryDir(): Promise<void> {
 }
 
 // ---- 检查更新 ----
-const checkingUpdate = ref(false)
 const updateModal = ref<UpdateCheckResult | null>(null)
 const updateDownloading = ref(false)
 const updateDownloadPercent = ref(0)
 const updateDownloadMsg = ref('')
 let updateUnsub: (() => void) | null = null
-
-async function checkUpdate(): Promise<void> {
-  checkingUpdate.value = true
-  try {
-    const res = await window.api.checkForUpdates()
-    if (res.error) {
-      message.error(`检查更新失败：${res.error}`)
-    } else if (res.hasUpdate) {
-      updateModal.value = res
-    } else {
-      message.success(`已是最新版本 v${res.current}`)
-    }
-  } catch (err) {
-    message.error(`检查更新失败：${(err as Error).message}`)
-  } finally {
-    checkingUpdate.value = false
-  }
-}
 
 function openUpdateUrl(): void {
   if (updateModal.value?.url) window.open(updateModal.value.url, '_blank')
@@ -557,18 +548,39 @@ async function saveConfig(): Promise<void> {
 }
 
 // ---- BepInEx 安装 ----
-async function openInstallModal(): Promise<void> {
-  showInstallModal.value = true
-  installProgress.value = null
-  installBusy.value = false
+function getRuntimePrefKey(gameDir: string): string {
+  let h = 0x811c9dc5
+  for (let i = 0; i < gameDir.length; i++) {
+    h ^= gameDir.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
+  }
+  return 'bepinex_runtime_' + (h >>> 0).toString(16)
+}
+
+function loadRuntimePref(gameDir: string): 'mono' | 'il2cpp' | null {
+  try {
+    const v = localStorage.getItem(getRuntimePrefKey(gameDir))
+    if (v === 'mono' || v === 'il2cpp') return v
+  } catch {
+    /* ignore */
+  }
+  return null
+}
+
+function saveRuntimePref(gameDir: string, runtime: 'mono' | 'il2cpp'): void {
+  try {
+    localStorage.setItem(getRuntimePrefKey(gameDir), runtime)
+  } catch {
+    /* ignore */
+  }
+}
+
+async function loadReleasesForRuntime(runtime: 'mono' | 'il2cpp'): Promise<void> {
+  loadingReleases.value = true
   selectedRelease.value = null
   selectedAssetIndex.value = 0
-  loadingReleases.value = true
   releases.value = []
   try {
-    const game = selectedGame.value
-    const isMono = game?.bepinex?.isMono ?? game?.engine?.includes('Mono') ?? false
-    const runtime: 'mono' | 'il2cpp' = isMono ? 'mono' : 'il2cpp'
     releases.value = await window.api.listBepInExReleases(runtime)
     if (releases.value.length === 0) {
       message.warning('没有可用版本，请稍后重试')
@@ -577,6 +589,48 @@ async function openInstallModal(): Promise<void> {
     message.error(`获取版本列表失败: ${e}`)
   } finally {
     loadingReleases.value = false
+  }
+}
+
+function chooseInstallRuntime(choice: InstallRuntimeChoice): void {
+  if (installBusy.value || installProgress.value) return
+  installRuntimeChoice.value = choice
+  const game = selectedGame.value
+  const rt = installRuntime.value
+  if (rt) {
+    if (choice !== 'auto' && game) saveRuntimePref(game.gameDir, rt)
+    installRuntimeWarning.value = ''
+    void loadReleasesForRuntime(rt)
+  } else {
+    installRuntimeWarning.value = '未能自动识别游戏引擎，请手动选择 Mono 或 IL2CPP 后再下载'
+    releases.value = []
+    selectedRelease.value = null
+    selectedAssetIndex.value = 0
+  }
+}
+
+async function openInstallModal(): Promise<void> {
+  showInstallModal.value = true
+  installProgress.value = null
+  installBusy.value = false
+  selectedRelease.value = null
+  selectedAssetIndex.value = 0
+  releases.value = []
+  const game = selectedGame.value
+  installRuntimeDetected.value = game?.bepinex
+    ? game.bepinex.isMono
+      ? 'mono'
+      : 'il2cpp'
+    : (game?.runtime ?? null)
+  const pref = game && !game.bepinex && !game.runtime ? loadRuntimePref(game.gameDir) : null
+  installRuntimeChoice.value = pref ?? 'auto'
+  installRuntimeWarning.value = ''
+  const rt = installRuntime.value
+  if (rt) {
+    await loadReleasesForRuntime(rt)
+  } else {
+    loadingReleases.value = false
+    installRuntimeWarning.value = '未能自动识别游戏引擎，请手动选择 Mono 或 IL2CPP 后再下载'
   }
 }
 
@@ -657,30 +711,6 @@ async function doUninstall(): Promise<void> {
 
 
 // ---- 日志操作 ----
-async function openLogModal(): Promise<void> {
-  if (!selectedGame.value) return
-  showLogModal.value = true
-  await loadLog()
-  // 打开期间每 5 秒增量刷新
-  if (logTimer) clearInterval(logTimer)
-  logTimer = setInterval(async () => {
-    if (!selectedGame.value || !showLogModal.value) return
-    try {
-      const tail = await window.api.tailLog(selectedGame.value.gameDir)
-      if (tail.entries.length > 0 && logData.value) {
-        logData.value = {
-          ...tail,
-          entries: [...logData.value.entries, ...tail.entries],
-          entryCount: logData.value.entryCount + tail.entries.length,
-          errorStats: tail.errorStats.length > 0 ? tail.errorStats : logData.value.errorStats
-        }
-      }
-    } catch {
-      /* 游戏目录变化时静默 */
-    }
-  }, 5000)
-}
-
 async function loadLog(): Promise<void> {
   if (!selectedGame.value) return
   try {
@@ -1372,6 +1402,43 @@ function displayName(p: PluginInfo): string {
         <button class="icon-btn" @click="showInstallModal = false">✕</button>
       </div>
 
+      <div class="runtime-selector">
+        <span class="dim">运行时：</span>
+        <button
+          class="runtime-opt"
+          :class="{ active: installRuntimeChoice === 'auto' }"
+          :disabled="installBusy || !!installProgress"
+          @click="chooseInstallRuntime('auto')"
+        >
+          自动检测
+        </button>
+        <button
+          class="runtime-opt"
+          :class="{ active: installRuntimeChoice === 'mono' }"
+          :disabled="installBusy || !!installProgress"
+          @click="chooseInstallRuntime('mono')"
+        >
+          Mono（BepInEx 5.x）
+        </button>
+        <button
+          class="runtime-opt"
+          :class="{ active: installRuntimeChoice === 'il2cpp' }"
+          :disabled="installBusy || !!installProgress"
+          @click="chooseInstallRuntime('il2cpp')"
+        >
+          IL2CPP（BepInEx 6.x）
+        </button>
+      </div>
+      <div v-if="installRuntimeChoice === 'auto' && installRuntimeDetected" class="runtime-hint ok">
+        ✅ 已自动识别：{{ selectedGame?.engine || (installRuntimeDetected === 'mono' ? 'Unity (Mono)' : 'Unity (IL2CPP)') }}
+      </div>
+      <div v-else-if="installRuntimeChoice === 'auto' && !installRuntimeDetected" class="runtime-hint warn">
+        ⚠️ {{ installRuntimeWarning || '未能自动识别游戏引擎，请手动选择' }}
+      </div>
+      <div v-else-if="installRuntime" class="runtime-hint dim">
+        当前将安装：{{ installRuntime === 'mono' ? 'Mono 版（BepInEx 5.x）' : 'IL2CPP 版（BepInEx 6.x）' }}（手动选择）
+      </div>
+
       <div v-if="loadingReleases" class="center-box slim">
         <div class="loading-ring"></div>
         <div class="center-text dim">获取版本列表…</div>
@@ -1421,7 +1488,7 @@ function displayName(p: PluginInfo): string {
               </div>
             </div>
             <div v-if="releases.length === 0" class="center-box slim">
-              <div class="center-text dim">暂时拿不到版本列表，请稍后重试</div>
+              <div class="center-text dim">{{ installRuntimeWarning || '暂时拿不到版本列表，请稍后重试' }}</div>
             </div>
           </div>
 
@@ -2713,6 +2780,50 @@ function displayName(p: PluginInfo): string {
 }
 .cfg-input:focus {
   border-color: #4c9aff;
+}
+
+/* 安装弹窗运行时选择 */
+.runtime-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px 0;
+  flex-wrap: wrap;
+}
+.runtime-opt {
+  background: transparent;
+  border: 1px solid #343a46;
+  color: #b8c0cc;
+  border-radius: 8px;
+  padding: 5px 12px;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.runtime-opt:hover {
+  border-color: #4c9aff;
+  color: #e8eaee;
+}
+.runtime-opt.active {
+  background: #4c9aff;
+  border-color: #4c9aff;
+  color: #fff;
+  font-weight: 600;
+}
+.runtime-opt:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.runtime-hint {
+  margin: 10px 16px 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.runtime-hint.ok {
+  color: #7ee2a8;
+}
+.runtime-hint.warn {
+  color: #f5b759;
 }
 
 /* 安装弹窗内容 */

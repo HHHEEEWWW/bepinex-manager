@@ -20,6 +20,8 @@ export interface GameEntry {
   compatible: boolean
   /** 检测到的引擎描述（如 'Unity (IL2CPP)'、'Unity (Mono)'、'.NET (XNA?)'），未知为 null */
   engine: string | null
+  /** 检测到的 Unity 运行时类型；非 Unity/无法识别时为 null */
+  runtime: UnityRuntime | null
 }
 
 /** BepInEx 安装信息 */
