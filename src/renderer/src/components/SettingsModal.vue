@@ -86,6 +86,10 @@ const logFilter = ref<'all' | 'error' | 'warn'>('all')
 // ---- 更新相关 ----
 const checkingUpdate = ref(false)
 const updateResult = ref<UpdateCheckResult | null>(null)
+const updateDownloading = ref(false)
+const updateDownloadPercent = ref(0)
+const updateDownloadMsg = ref('')
+let updateUnsub: (() => void) | null = null
 
 // ---- Thunderstore 相关 ----
 const tsQuery = ref('')
@@ -114,6 +118,45 @@ async function checkUpdate(): Promise<void> {
     message.error('检查更新失败')
   } finally {
     checkingUpdate.value = false
+  }
+}
+
+async function downloadAndUpdate(): Promise<void> {
+  const res = updateResult.value
+  if (!res?.setupUrl) {
+    if (res?.url) window.open(res.url, '_blank')
+    else message.warning('没有可用的自动下载地址，请前往 GitHub 页面下载')
+    return
+  }
+
+  updateDownloading.value = true
+  updateDownloadPercent.value = 0
+  updateDownloadMsg.value = '准备下载…'
+  updateUnsub?.()
+  updateUnsub = window.api.onUpdateProgress((p) => {
+    updateDownloadPercent.value = p.percent
+    updateDownloadMsg.value = p.message
+  })
+
+  try {
+    const dl = await window.api.downloadUpdate(res.setupUrl)
+    updateDownloadMsg.value = '下载完成，正在启动安装向导…'
+    updateUnsub?.()
+    updateUnsub = null
+
+    const result = await window.api.applyUpdate(dl.setupPath)
+    if (!result.ok) {
+      message.error(`启动安装向导失败：${result.message}`)
+    } else {
+      message.success('已启动安装向导，请按提示完成更新')
+    }
+  } catch (err) {
+    message.error(`自动下载更新失败：${(err as Error).message}`)
+  } finally {
+    updateDownloading.value = false
+    updateUnsub?.()
+    updateUnsub = null
+    updateDownloadMsg.value = ''
   }
 }
 
@@ -321,7 +364,18 @@ function selectGroup(key: SettingsGroup): void {
                   <div class="status-text">
                     发现新版本 <strong>v{{ updateResult.latest }}</strong>
                   </div>
-                  <a v-if="updateResult.url" class="btn-download" :href="updateResult.url" target="_blank">
+                  <template v-if="updateDownloading">
+                    <div class="update-download">
+                      <div class="progress-track">
+                        <div class="progress-fill" :style="{ width: updateDownloadPercent + '%' }"></div>
+                      </div>
+                      <span class="dim mini">{{ updateDownloadMsg }}（{{ updateDownloadPercent }}%）</span>
+                    </div>
+                  </template>
+                  <button v-else-if="updateResult.setupUrl" class="btn-download" :disabled="updateDownloading" @click="downloadAndUpdate">
+                    ⬇ 自动下载并安装
+                  </button>
+                  <a v-else-if="updateResult.url" class="btn-download" :href="updateResult.url" target="_blank">
                     前往下载
                   </a>
                 </template>
@@ -859,6 +913,30 @@ function selectGroup(key: SettingsGroup): void {
 .btn-check:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.update-download {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 220px;
+}
+.progress-track {
+  width: 100%;
+  height: 6px;
+  background: #2a2f3a;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background: #4c9aff;
+  border-radius: 999px;
+  transition: width 0.2s ease;
+}
+.mini {
+  font-size: 12px;
+  color: #8b93a1;
 }
 
 /* Thunderstore */
